@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grok SSO 提取器</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #2f81f7;
+    --accent-hover: #1f6feb;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 60px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 8px 14px; cursor: pointer; font-size: 13px; font-weight: 500;
+  }
+  button:hover { background: var(--accent-hover); }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  button.ghost:hover { background: var(--panel); }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; margin-bottom: 14px;
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .email { font-weight: 600; font-size: 15px; word-break: break-all; }
+  .meta { color: var(--muted); font-size: 12px; margin: 4px 0 10px; word-break: break-all; }
+  .token-box {
+    position: relative; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; word-break: break-all; color: var(--muted); max-height: 120px; overflow-y: auto;
+    user-select: all;
+  }
+  .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--muted); }
+  .badge.ok { color: var(--green); border-color: var(--green); }
+  .badge.warn { color: var(--yellow); border-color: var(--yellow); }
+  .badge.expired { color: var(--red); border-color: var(--red); }
+  .empty { text-align: center; color: var(--muted); padding: 50px 0; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 24px; line-height: 1.7; }
+  .hint code { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+  .hint strong { color: var(--text); }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--green); color: #fff; padding: 10px 20px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Grok SSO 提取器</h1>
+      <div class="sub">读取 cpa_auths/*.json · 复制 SSO Key 或一键生成 sub2api 导入 JSON</div>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="ghost" onclick="downloadSub2api(null)">全部生成 sub2api JSON</button>
+      <button class="ghost" onclick="load()">刷新</button>
+    </div>
+  </header>
+  <div id="list"></div>
+  <div class="hint">
+    <strong>方式一（手动复制）：</strong><br>
+    1. 在 grok-register WebUI 注册账号（access_token 自动落盘 cpa_auths/）<br>
+    2. 点「复制 SSO Key」→ 去 sub2api 后台 Grok 账号 → SSO Cookie 导入 → 粘贴 → 转换<br>
+    &nbsp;&nbsp;（注意：此路 sub2api 后端会访问 x.ai 做转换，若服务器连不上 x.ai 会超时失败）<br>
+    <br>
+    <strong>方式二（推荐，绕开 x.ai 网络问题）：</strong><br>
+    1. 点「生成 sub2api JSON」下载文件<br>
+    2. 去 sub2api 后台「批量创建账号」→ 上传该 JSON<br>
+    3. 账号直接入库（base_url=cli-chat-proxy.grok.com/v1，SSO token 直连 grok，不经过 x.ai）<br>
+    <br>
+    启动命令：<code>python scripts/sso_extractor/server.py</code>（端口 8093）
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+function copyToken(tk) {
+  if (!tk) { toast('token 为空'); return; }
+  navigator.clipboard.writeText(tk).then(
+    () => toast('已复制 SSO Key'),
+    () => toast('复制失败，请手动选择复制')
+  );
+}
+
+async function downloadSub2api(email) {
+  let url = '/api/export-sub2api';
+  if (email) url += '?email=' + encodeURIComponent(email);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      toast('生成失败：' + (e.detail || res.status));
+      return;
+    }
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = email ? ('sub2api-grok-' + email + '.json') : 'sub2api-grok-all.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    toast('已生成，去 sub2api 后台「批量创建账号」上传');
+  } catch (e) {
+    toast('生成失败：' + e.message);
+  }
+}
+
+function statusBadge(expired) {
+  if (!expired) return '<span class="badge">无过期信息</span>';
+  const d = new Date(expired);
+  if (isNaN(d)) return '<span class="badge">过期字段异常</span>';
+  const now = new Date();
+  const diffMin = (d - now) / 60000;
+  if (diffMin <= 0) return '<span class="badge expired">已过期</span>';
+  if (diffMin < 60) return '<span class="badge warn">约 ' + Math.round(diffMin) + ' 分钟后过期</span>';
+  return '<span class="badge ok">有效</span>';
+}
+
+function render(accounts) {
+  const list = document.getElementById('list');
+  if (!accounts.length) {
+    list.innerHTML = '<div class="empty">暂无账号。先在 grok-register 注册，cpa_auths/ 下会生成 xai-*.json。</div>';
+    return;
+  }
+  list.innerHTML = accounts.map((a, i) => `
+    <div class="card">
+      <div class="card-head">
+        <span class="email">${a.email || '(无邮箱)'}</span>
+        ${statusBadge(a.expired)}
+      </div>
+      <div class="meta">文件: ${a.file}<br>base_url: ${a.base_url || '-'}</div>
+      <div class="token-box">${a.access_token || '(无 token)'}</div>
+      <div class="actions">
+        <button onclick="copyToken(${JSON.stringify(a.access_token).replace(/"/g, '&quot;')})">复制 SSO Key</button>
+        <button class="ghost" onclick="downloadSub2api(${JSON.stringify(a.email || '').replace(/"/g,'&quot;')})">生成 sub2api JSON</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/accounts');
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.detail || '加载失败');
+    render(data.accounts);
+  } catch (e) {
+    document.getElementById('list').innerHTML =
+      '<div class="empty">加载失败：' + e.message + '</div>';
+  }
+}
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+name: sync-upstream
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.WORKFLOW_PAT }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/AaronL725/grok-register.git
+          git fetch upstream
+
+      - name: Update upstream-sync mirror
+        run: |
+          git checkout -B upstream-sync upstream/main
+          git push origin upstream-sync --force
+
+      - name: Merge upstream into main
+        run: |
+          git checkout main
+          git merge upstream/main --no-edit -m "chore: merge upstream $(date -u +%Y-%m-%d)"
+          git push origin main
