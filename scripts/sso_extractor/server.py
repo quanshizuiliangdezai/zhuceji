@@ -49,18 +49,22 @@ def _read_accounts():
                 data = json.loads(Path(p).read_text(encoding="utf-8"))
             except Exception:
                 continue
-            expires_at = data.get("expires_at")
-            expired_iso = ""
-            if expires_at:
-                try:
-                    expired_iso = datetime.fromtimestamp(int(expires_at)).isoformat()
-                except Exception:
-                    pass
+            # grok-register 不同版本字段名不同：有的用 ISO 字符串 'expired'，有的用 Unix 秒 'expires_at'
+            expired_iso = data.get("expired", "")
+            if not expired_iso:
+                expires_at = data.get("expires_at")
+                if expires_at:
+                    try:
+                        expired_iso = datetime.fromtimestamp(int(expires_at)).isoformat()
+                    except Exception:
+                        pass
             accounts.append({
                 "file": os.path.basename(p),
                 "email": data.get("email", ""),
                 "base_url": data.get("base_url", ""),
                 "access_token": data.get("access_token", ""),
+                "refresh_token": data.get("refresh_token", ""),
+                "token_type": data.get("token_type", ""),
                 "expired": expired_iso,
                 "type": data.get("type", ""),
             })
@@ -94,16 +98,25 @@ def export_sub2api(email: str = None):
             continue
         base_url = data.get("base_url") or GROK_SUBSCRIPTION_PROXY
         name = data.get("email") or data.get("file")
+        # sub2api 的 Grok OAuth 账号需要 refresh_token 才能自动刷新，
+        # 否则点「同步上游模型/测试连接」会报 "grok oauth refresh token is missing"。
+        credentials = {
+            "access_token": token,
+            "base_url": base_url,
+            "model_mapping": {},
+        }
+        if data.get("refresh_token"):
+            credentials["refresh_token"] = data["refresh_token"]
+        if data.get("token_type"):
+            credentials["token_type"] = data["token_type"]
+        if data.get("expired"):
+            credentials["expires_at"] = data["expired"]
         accounts.append({
             "name": name,
             "notes": "grok-register SSO token",
             "platform": "grok",
             "type": "oauth",
-            "credentials": {
-                "access_token": token,
-                "base_url": base_url,
-                "model_mapping": {},
-            },
+            "credentials": credentials,
             "extra": {},
             "concurrency": 1,
             "priority": 0,
