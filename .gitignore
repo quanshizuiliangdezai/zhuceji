@@ -42,3 +42,7 @@ tunnel_run.log
 
 # plink 二进制（面板"安装 plink"从官网下载到 tools/，非源码）
 tools/
+
+# deploy logs
+web-deploy.log
+web-deploy.err
