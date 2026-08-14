@@ -461,9 +461,15 @@ def stop():
 
 
 def main() -> None:
+    import argparse
     import uvicorn
 
-    uvicorn.run("web.server:app", host="127.0.0.1", port=8092, workers=1)
+    parser = argparse.ArgumentParser(description="grok-register WebUI 服务")
+    parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8092, help="监听端口 (默认 8092)")
+    parser.add_argument("--workers", type=int, default=1, help="worker 数量 (默认 1)")
+    args = parser.parse_args()
+    uvicorn.run("web.server:app", host=args.host, port=args.port, workers=args.workers)
 
 
 # ---------------------------------------------------------------------------
