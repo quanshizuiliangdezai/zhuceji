@@ -230,6 +230,104 @@ def remove_autostart():
     return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
 
 
+# ---------------------------------------------------------------------------
+# 隧道（永久反向 SSH 隧道）API
+# ---------------------------------------------------------------------------
+@app.get("/api/tunnel/config")
+def get_tunnel_config():
+    from web import tunnel_helper as th
+    cfg = th.read_cfg(ROOT)
+    # 不原样回吐敏感字段，改为"是否已设置"标记
+    return {
+        "ok": True,
+        "config": cfg,
+        "key_pass_set": bool(cfg.get("key_pass")),
+        "password_set": bool(cfg.get("password")),
+        "status": th.tunnel_status(ROOT),
+    }
+
+
+@app.put("/api/tunnel/config")
+def put_tunnel_config(payload: dict):
+    from web import tunnel_helper as th
+    existing = th.read_cfg(ROOT)
+    new = dict(payload or {})
+    # 密码/私钥密码留空则保留原有的（避免误清空）
+    if not str(new.get("key_pass", "")).strip():
+        new["key_pass"] = existing.get("key_pass", "")
+    if not str(new.get("password", "")).strip():
+        new["password"] = existing.get("password", "")
+    cfg = th.save_cfg(ROOT, new)
+    return {"ok": True, "config": cfg,
+            "key_pass_set": bool(cfg.get("key_pass")),
+            "password_set": bool(cfg.get("password"))}
+
+
+@app.post("/api/tunnel/start")
+def start_tunnel():
+    from web import tunnel_helper as th
+    cfg = th.read_cfg(ROOT)
+    try:
+        result = th.start_tunnel(ROOT, cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="建立隧道失败: %s" % exc) from exc
+    return result
+
+
+@app.post("/api/tunnel/stop")
+def stop_tunnel():
+    from web import tunnel_helper as th
+    try:
+        result = th.stop_tunnel(ROOT)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="停止隧道失败: %s" % exc) from exc
+    return result
+
+
+@app.get("/api/tunnel/status")
+def tunnel_status_api():
+    from web import tunnel_helper as th
+    return th.tunnel_status(ROOT)
+
+
+@app.post("/api/tunnel/test")
+def test_tunnel():
+    from web import tunnel_helper as th
+    cfg = th.read_cfg(ROOT)
+    try:
+        result = th.test_tunnel(ROOT, cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="隧道测试失败: %s" % exc) from exc
+    return result
+
+
+@app.get("/api/tunnel/autostart")
+def get_tunnel_autostart():
+    from web import tunnel_helper as th
+    return th.autostart_status(ROOT)
+
+
+@app.post("/api/tunnel/autostart/install")
+def install_tunnel_autostart():
+    from web import tunnel_helper as th
+    cfg = th.read_cfg(ROOT)
+    try:
+        result = th.install_autostart(ROOT, cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="设置隧道开机自启失败: %s" % exc) from exc
+    return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
+
+
+@app.post("/api/tunnel/autostart/remove")
+def remove_tunnel_autostart():
+    from web import tunnel_helper as th
+    try:
+        result = th.remove_autostart()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="取消隧道开机自启失败: %s" % exc) from exc
+    return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
+
+
 @app.get("/api/config")
 def get_config():
     return {"ok": True, "config": _load_config_if_idle()}

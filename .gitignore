@@ -32,3 +32,10 @@ screenshots/
 # 开机自启启动器（由面板"开机自启"按钮运行时生成，非源码）
 autostart_panel.ps1
 autostart_panel.sh
+
+# 永久隧道（由面板"隧道"tab 生成，含真实服务器/密钥配置，非源码）
+tunnel.json
+tunnel_run.ps1
+tunnel_run.sh
+tunnel_run.pid
+tunnel_run.log
