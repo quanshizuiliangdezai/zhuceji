@@ -20,6 +20,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 import grok_register_ttk as engine
 
 ROOT = Path(__file__).resolve().parent.parent
+from web import tunnel_helper as _tunnel_helper
+_tunnel_helper.ROOT_HINT = ROOT  # 让隧道助手校验时能正确定位 tools/plink.exe
 INDEX_HTML = Path(__file__).resolve().parent / "index.html"
 PROXY_POOL_JS = Path(__file__).resolve().parent / "proxy-pool.js"
 PROXY_POOL_CSS = Path(__file__).resolve().parent / "proxy-pool.css"
@@ -326,6 +328,19 @@ def remove_tunnel_autostart():
     except Exception as exc:
         raise HTTPException(status_code=500, detail="取消隧道开机自启失败: %s" % exc) from exc
     return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
+
+
+@app.get("/api/tunnel/plink")
+def tunnel_plink(action: str = ""):
+    from web import tunnel_helper as th
+    th.ROOT_HINT = ROOT
+    if action == "download":
+        try:
+            path = th.download_plink(ROOT)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="下载 plink 失败: %s" % exc) from exc
+        return {"ok": True, "path": path, "info": th.check_plink(ROOT, th.read_cfg(ROOT))}
+    return {"ok": True, "info": th.check_plink(ROOT, th.read_cfg(ROOT))}
 
 
 @app.get("/api/config")

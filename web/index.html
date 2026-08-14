@@ -52,6 +52,13 @@
 .tunnel-test-line{padding:4px 0}
 .tunnel-test-line.ok{color:var(--green)}
 .tunnel-test-line.bad{color:var(--red)}
+.tunnel-plink{margin-top:14px;padding:12px 14px;background:var(--panel3);border:1px solid var(--line);border-radius:8px}
+.tunnel-plink-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.tunnel-plink-head b{color:var(--accent)}
+.tunnel-plink-head button{height:30px;padding:0 14px;border-radius:7px;font-weight:600;font-size:12px;background:transparent;color:var(--fg);border:1px solid var(--line);cursor:pointer}
+.tunnel-plink-head button:hover{background:var(--panel)}
+.tunnel-plink-tip{margin-top:8px;font-size:12px;color:var(--muted);line-height:1.6}
+.tunnel-plink-tip code{background:var(--panel);padding:1px 5px;border-radius:4px;font-size:11px}
 @media(max-width:760px){.tunnel-grid{grid-template-columns:1fr 1fr}}
 .sso-badge.ok{color:var(--green);border-color:var(--green)}
 .sso-badge.warn{color:var(--warn);border-color:var(--warn)}
@@ -247,6 +254,12 @@ function renderFields() {
         + '<label class="tunnel-field"><span>' + tt('password') + '</span><input id="tunnelPassword" type="password" placeholder="' + tt('password') + '"></label>'
         + '<label class="tunnel-field"><span>' + tt('localPort') + '</span><input id="tunnelLocalPort" type="number" value="18080"></label>'
         + '<label class="tunnel-field"><span>' + tt('remotePort') + '</span><input id="tunnelRemotePort" type="number" value="18080"></label>'
+        + '</div>'
+        + '<div class="tunnel-plink" id="tunnelPlinkBox" style="display:none">'
+        + '<div class="tunnel-plink-head"><span class="tunnel-as-label">Plink：<b id="tunnelPlinkState">检测中…</b></span>'
+        + '<button class="ghost" id="tunnelPlinkInstallBtn">安装 plink</button></div>'
+        + '<label class="tunnel-field" style="max-width:560px"><span>plink 路径（可选，留空=自动探测）</span><input id="tunnelPlinkPath" placeholder="留空则用 tools/plink.exe 或系统 PATH 中的 plink"></label>'
+        + '<div class="tunnel-plink-tip">密码模式使用 PuTTY 的 plink 通过 <code>-pw</code> 传密码建隧道（Windows OpenSSH 无法非交互传密码）。未检测到 plink 时点「安装 plink」自动从官网下载到项目 <code>tools/</code> 目录。</div>'
         + '</div>'
         + '<div class="tunnel-actions"><button class="ghost" id="tunnelSaveBtn">' + tt('save') + '</button><button class="ghost" id="tunnelTestBtn">' + tt('test') + '</button><button id="tunnelBuildBtn">' + tt('build') + '</button><button id="tunnelStopBtn">' + tt('stop') + '</button></div>'
         + '<div class="tunnel-autostart"><span class="tunnel-as-label">' + tt('autostart') + '：<b id="tunnelAsState">' + tt('autostartOff') + '</b></span>'
@@ -655,6 +668,8 @@ function bindTunnel() {
   bind('tunnelTestBtn', testTunnel);
   bind('tunnelAsSetBtn', () => setTunnelAutostart(true));
   bind('tunnelAsCancelBtn', () => setTunnelAutostart(false));
+  const auth = $('tunnelAuth'); if (auth) auth.onchange = toggleTunnelPlinkBox;
+  bind('tunnelPlinkInstallBtn', installPlink);
 }
 
 function _tunnelCfgFromForm() {
@@ -667,6 +682,7 @@ function _tunnelCfgFromForm() {
     key_path: $('tunnelKeyPath').value.trim(),
     key_pass: $('tunnelKeyPass').value,
     password: $('tunnelPassword').value,
+    plink_path: $('tunnelPlinkPath').value.trim(),
     local_port: num('tunnelLocalPort', 18080),
     remote_port: num('tunnelRemotePort', 18080),
   };
@@ -687,7 +703,9 @@ async function loadTunnelConfig() {
     $('tunnelPassword').value = d.password_set ? c.password || '' : '';
     $('tunnelLocalPort').value = c.local_port || 18080;
     $('tunnelRemotePort').value = c.remote_port || 18080;
+    $('tunnelPlinkPath').value = c.plink_path || '';
     renderTunnelStatus(d.status, d.detail);
+    toggleTunnelPlinkBox();
   } catch (e) {
     setNotice(tt('loadFailed') + ': ' + e.message, true);
   }
@@ -772,6 +790,43 @@ async function setTunnelAutostart(on) {
     setNotice(d.message || (on ? tt('autostartOn') : tt('autostartOff')), false);
     loadTunnelConfig();
   } catch (e) { setNotice('操作失败: ' + e.message, true); }
+}
+
+function toggleTunnelPlinkBox() {
+  const box = $('tunnelPlinkBox');
+  if (!box) return;
+  const isPwd = $('tunnelAuth').value === 'password';
+  box.style.display = isPwd ? 'block' : 'none';
+  if (isPwd) loadTunnelPlinkStatus();
+}
+
+async function loadTunnelPlinkStatus() {
+  try {
+    const r = await fetch('/api/tunnel/plink');
+    const d = await r.json();
+    const el = $('tunnelPlinkState');
+    if (!el || !d.info) return;
+    if (d.info.available) {
+      el.textContent = '已就绪 · ' + (d.info.version || '').slice(0, 28);
+      el.style.color = 'var(--green)';
+    } else {
+      el.textContent = '未检测到，请点「安装 plink」';
+      el.style.color = 'var(--red)';
+    }
+  } catch (e) { /* 忽略：plink 状态不影响主流程 */ }
+}
+
+async function installPlink() {
+  const st = $('tunnelPlinkState');
+  if (st) st.textContent = '下载中…';
+  try {
+    await saveTunnelConfig();  // 先把 plink_path 等写入 tunnel.json
+    const r = await fetch('/api/tunnel/plink?action=download', { method: 'GET' });
+    const d = await r.json();
+    if (!d.ok) { setNotice('安装 plink 失败: ' + (d.detail || ''), true); return; }
+    setNotice('plink 已安装到 ' + (d.path || ''), false);
+  } catch (e) { setNotice('安装 plink 失败: ' + e.message, true); }
+  loadTunnelPlinkStatus();
 }
 
 function displayPanelHost(host) {

@@ -5,37 +5,52 @@
 即服务器上的 `127.0.0.1:remote_port` 流量会被转发回本机 `127.0.0.1:local_port`。
 用户原话：本地 ip:18080 - 服务器 ip:18080。
 
+认证方式：
+- key     ：OpenSSH 密钥免密（沿用系统 ssh.exe 或 git 自带 ssh）。
+- password：用 PuTTY 的 plink.exe，支持 `-pw 密码` 非交互传密码建隧道
+            （Windows OpenSSH 无法非交互传密码，plink 可以）。
+            plink 由面板检测/一键下载到项目 tools/ 目录，无需用户手动装 PuTTY。
+
 设计要点（对应"需要提供的信息弄成面板输入框 + 可设置开机自启 + 时刻读取真实信息"）：
 - 所有连接参数都来自面板填写并保存到 tunnel.json，启动器脚本（tunnel_run.ps1）运行时不写死，
   每次循环都**实时读取 tunnel.json**，改了配置下次重连立即生效，无需重新建立。
-- 启动器带**重连循环**（ServerAlive + ExitOnForwardFailure），掉线自动重连。
-- 进程跟踪用 pidfile（tunnel_run.pid），停止时按 pid 树 kill，并用 wmic 兜底按命令行特征清理。
+- 启动器带**重连循环**（ssh 用 ServerAlive + ExitOnForwardFailure；plink 用退出后 10s 重连），
+  掉线自动重连。
+- 进程跟踪用 pidfile（tunnel_run.pid），停止时按 pid 树 kill，并用 wmic 兜底按命令行特征清理
+  （同时覆盖 ssh.exe 与 plink.exe）。
 - 开机自启注册为 Windows 任务计划 ONLOGON（登录时后台启动启动器），与面板自启同理。
-- 目前**仅支持密钥免密**认证（Windows OpenSSH 无法非交互传密码）；密码登录字段保留但会提示。
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import ssl
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 TUNNEL_CFG = "tunnel.json"
 TUNNEL_TASK = "grok-register-tunnel-autostart"
 RUNNER = "tunnel_run.ps1"
 PIDFILE = "tunnel_run.pid"
+PLINK_PRIMARY = "https://the.earth.li/~sgtatham/putty/latest/w64/plink.exe"
+PLINK_FALLBACKS = [
+    "https://www.chiark.greenend.org.uk/~sgtatham/putty/latest/w64/plink.exe",
+]
 
 DEFAULTS = {
     "server": "",          # 服务器地址 / IP
     "ssh_port": 22,         # SSH 端口
     "user": "root",         # SSH 登录用户
-    "auth": "key",          # key | password（仅 key 免密可用）
+    "auth": "key",          # key | password（password 走 plink 支持密码）
     "key_path": "",         # 私钥路径（ed25519/rsa）
-    "key_pass": "",         # 私钥密码（可选，需 ssh-agent，通常留空）
-    "password": "",         # 密码登录（非交互不支持，保留字段）
+    "key_pass": "",         # 私钥密码（可选，通常留空）
+    "password": "",         # 密码登录（password 模式走 plink -pw）
+    "plink_path": "",       # plink 可执行路径（留空=自动探测：tools/plink.exe → PATH → 常见位置）
     "local_port": 18080,    # 本机被转发的端口
     "remote_port": 18080,   # 服务器上暴露的端口
     "enabled": False,       # 是否已建立（仅作 UI 提示）
@@ -85,7 +100,12 @@ def save_cfg(root: Path, data: dict) -> dict:
 def ssh_exe() -> str:
     if sys.platform == "win32":
         cand = r"C:\Windows\System32\OpenSSH\ssh.exe"
-        return cand if os.path.isfile(cand) else "ssh"
+        if os.path.isfile(cand):
+            return cand
+        git = r"C:\Program Files\Git\usr\bin\ssh.exe"
+        if os.path.isfile(git):
+            return git
+        return "ssh"
     return "ssh"
 
 
@@ -103,6 +123,71 @@ def _run(cmd, input_text=None, timeout=60, cwd=None):
     )
 
 
+# ---------------------------------------------------------------------------
+# Plink（PuTTY）检测 / 下载
+# ---------------------------------------------------------------------------
+def find_plink(cfg: dict, root: Path) -> str | None:
+    """定位 plink 可执行文件：优先用户指定路径 → 项目 tools/plink.exe → 常见位置 → PATH。"""
+    candidates: list[str] = []
+    custom = str(cfg.get("plink_path", "")).strip()
+    if custom:
+        candidates.append(custom)
+    candidates.append(str(root / "tools" / "plink.exe"))
+    candidates.append(r"C:\Program Files\PuTTY\plink.exe")
+    candidates.append(r"C:\Program Files (x86)\PuTTY\plink.exe")
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return c
+    found = shutil.which("plink") or shutil.which("plink.exe")
+    if found:
+        return found
+    return None
+
+
+def _plink_version(path: str) -> str:
+    try:
+        out = _run([path, "-V"], timeout=20)
+        text = (out.stderr or out.stdout).strip()
+        if text:
+            return text.splitlines()[0][:80]
+    except Exception:
+        pass
+    return ""
+
+
+def check_plink(root: Path, cfg: dict) -> dict:
+    p = find_plink(cfg, root)
+    if p:
+        return {"available": True, "path": p, "version": _plink_version(p)}
+    return {"available": False, "path": None, "version": ""}
+
+
+def download_plink(root: Path) -> str:
+    """从 PuTTY 官方下载 64 位 plink.exe 到项目 tools/ 目录。返回路径。
+
+    依次尝试主源与备用镜像，任一成功即用（自动跟随 latest 最新版）。
+    """
+    dest = root / "tools" / "plink.exe"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    ctx = ssl.create_default_context()
+    last_err = None
+    for url in [PLINK_PRIMARY] + PLINK_FALLBACKS:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=180, context=ctx) as resp:
+                data = resp.read()
+            if len(data) < 100_000:
+                raise RuntimeError("下载的 plink.exe 过小（%d 字节）" % len(data))
+            dest.write_bytes(data)
+            return str(dest)
+        except Exception as exc:
+            last_err = exc
+    raise RuntimeError("所有 plink 下载源均失败: %s" % last_err)
+
+
+# ---------------------------------------------------------------------------
+# 校验
+# ---------------------------------------------------------------------------
 def _validate(cfg: dict) -> str:
     """返回错误信息字符串，空串表示校验通过。"""
     if not str(cfg.get("server", "")).strip():
@@ -128,8 +213,14 @@ def _validate(cfg: dict) -> str:
             return "私钥文件不存在: %s" % kp
     elif cfg.get("auth") == "password":
         if not str(cfg.get("password", "")).strip():
-            return "密码认证需要填写密码（注意：Windows OpenSSH 无法非交互传密码，建议改用密钥免密）"
+            return "密码认证需要填写服务器登录密码"
+        if not find_plink(cfg, ROOT_HINT if ROOT_HINT else Path.cwd()):
+            return "未检测到 plink，无法用密码建隧道：请先在隧道 tab 点「安装 plink」"
     return ""
+
+
+# ROOT 在运行时由调用方注入（server.py 启动时设置）；校验时若未注入则用 cwd 兜底
+ROOT_HINT: Path | None = None
 
 
 def build_ssh_args(cfg: dict) -> list:
@@ -153,6 +244,43 @@ def build_ssh_args(cfg: dict) -> list:
     args += ["-R", "%d:127.0.0.1:%d" % (remote, local)]
     args.append("%s@%s" % (str(cfg.get("user", "root")).strip(), str(cfg.get("server", "")).strip()))
     return args
+
+
+def build_plink_args(cfg: dict) -> list:
+    """plink 命令参数（含 -N -T）。密码通过 -pw 传入。
+
+    注意：plink 没有 OpenSSH 的 -accept-new-host-keys / -keepalive 选项；
+    首次 host key 提示由启动器里的 `echo y |` 管道喂入 y 自动接受（测试时通过
+    子进程 stdin 喂 'y'）。重连由外层 while 循环负责。
+    """
+    port = int(cfg.get("ssh_port", 22))
+    local = int(cfg.get("local_port", 18080))
+    remote = int(cfg.get("remote_port", 18080))
+    user = str(cfg.get("user", "root")).strip()
+    server = str(cfg.get("server", "")).strip()
+    password = str(cfg.get("password", ""))
+    args = [
+        "-N", "-T",
+        "-P", str(port),
+        "-R", "%d:127.0.0.1:%d" % (remote, local),
+        "-pw", password,
+        "%s@%s" % (user, server),
+    ]
+    return args
+
+
+def client_invocation(cfg: dict, root: Path):
+    """返回 (exe, base_args, is_plink) 用于执行远程命令测试。base_args 已去掉 -N -T。"""
+    if cfg.get("auth") == "password":
+        plink = find_plink(cfg, root)
+        if not plink:
+            raise RuntimeError("未找到 plink，无法用密码测试/建立隧道，请先安装 plink")
+        exe = plink
+        base = [a for a in build_plink_args(cfg) if a not in ("-N", "-T")]
+        return exe, base, True
+    exe = ssh_exe()
+    base = [a for a in build_ssh_args(cfg) if a not in ("-N", "-T")]
+    return exe, base, False
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +319,20 @@ while ($true) {
     $local = [int]($cfg.local_port)
     $remote = [int]($cfg.remote_port)
 
+    if ($auth -eq 'password') {
+        $plink = $cfg.plink_path
+        if (-not $plink -or -not (Test-Path $plink)) { $plink = "plink" }
+        $pargs = @('-N','-T','-P',"$port",'-R',"$remote`:127.0.0.1:$local",
+                   '-accept-new-host-keys','-keepalive','30','-pw',$cfg.password,"$user@$server")
+        Log "connecting (plink) $user@$server :$port  -R ${remote}:127.0.0.1:${local}"
+        # echo y 喂入首次 host key 确认（后台无 TTY 时靠管道 stdin）
+        echo y | & $plink @pargs
+        Log "tunnel exited, retry in 10s"
+        Start-Sleep -Seconds 10
+        continue
+    }
+
+    # 默认：OpenSSH 密钥免密
     $args = @('-p', "$port", '-N', '-T',
         '-o', 'StrictHostKeyChecking=accept-new',
         '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
@@ -212,7 +354,7 @@ while ($true) {
 
 
 # ---------------------------------------------------------------------------
-# 进程状态（pidfile 优先，wmic 兜底）
+# 进程状态（pidfile 优先，wmic 兜底；覆盖 ssh.exe 与 plink.exe）
 # ---------------------------------------------------------------------------
 def _pidfile_alive(root: Path) -> int:
     pf = root / PIDFILE
@@ -224,7 +366,6 @@ def _pidfile_alive(root: Path) -> int:
         return 0
     if pid <= 0:
         return 0
-    # 用 tasklist 确认进程还在
     try:
         out = _run(["tasklist", "/FI", "PID eq %d" % pid], timeout=15)
         if "PID" in out.stdout and str(pid) in out.stdout:
@@ -235,25 +376,26 @@ def _pidfile_alive(root: Path) -> int:
 
 
 def _wmic_marked_pids(cfg: dict) -> list:
-    """兜底：扫描 ssh.exe 中含本隧道 -R 标记与服务器的 PID。"""
+    """兜底：扫描 ssh.exe / plink.exe 中含本隧道 -R 标记与服务器的 PID。"""
     pids = []
     remote = int(cfg.get("remote_port", 18080))
     local = int(cfg.get("local_port", 18080))
     marker = "-R %d:127.0.0.1:%d" % (remote, local)
     server = str(cfg.get("server", "")).strip()
-    try:
-        out = _run(["wmic", "process", "where", "name='ssh.exe'",
-                    "get", "processid,commandline", "/format:csv"], timeout=20)
-        for line in out.stdout.splitlines():
-            low = line.lower()
-            if marker in low and server.lower() in low:
-                parts = line.split(",")
-                if parts:
-                    pid_str = parts[-1].strip()
-                    if pid_str.isdigit():
-                        pids.append(int(pid_str))
-    except Exception:
-        pass
+    for exe in ("ssh.exe", "plink.exe"):
+        try:
+            out = _run(["wmic", "process", "where", "name='%s'" % exe,
+                        "get", "processid,commandline", "/format:csv"], timeout=20)
+            for line in out.stdout.splitlines():
+                low = line.lower()
+                if marker in low and server.lower() in low:
+                    parts = line.split(",")
+                    if parts:
+                        pid_str = parts[-1].strip()
+                        if pid_str.isdigit():
+                            pids.append(int(pid_str))
+        except Exception:
+            pass
     return pids
 
 
@@ -268,6 +410,7 @@ def tunnel_status(root: Path) -> dict:
         "pid": pid or (marked[0] if marked else 0),
         "marked_pids": marked,
         "enabled": bool(cfg.get("enabled")),
+        "plink": check_plink(root, cfg),
         "config": {k: cfg[k] for k in ("server", "ssh_port", "user", "auth",
                                        "local_port", "remote_port")},
     }
@@ -277,6 +420,11 @@ def start_tunnel(root: Path, cfg: dict) -> dict:
     err = _validate(cfg)
     if err:
         return {"ok": False, "message": err}
+    if cfg.get("auth") == "password":
+        plink = find_plink(cfg, root)
+        if not plink:
+            return {"ok": False,
+                    "message": "未检测到 plink，无法用密码建隧道。请先在隧道 tab 点「安装 plink」"}
     cfg["enabled"] = True
     save_cfg(root, cfg)
     runner = write_runner(root)
@@ -294,12 +442,12 @@ def start_tunnel(root: Path, cfg: dict) -> dict:
         )
     except Exception as exc:
         return {"ok": False, "message": "启动隧道失败: %s" % exc}
-    # 稍等确认 pidfile 写入
     time.sleep(1.5)
     st = tunnel_status(root)
     if st["running"]:
-        return {"ok": True, "message": "隧道已建立（带重连），本机 %d → 服务器 %d"
-                % (int(cfg["local_port"]), int(cfg["remote_port"])),
+        return {"ok": True, "message": "隧道已建立（带重连），本机 %d → 服务器 %d（%s）"
+                % (int(cfg["local_port"]), int(cfg["remote_port"]),
+                   "plink 密码" if cfg.get("auth") == "password" else "密钥免密"),
                 "running": True, "pid": st["pid"]}
     return {"ok": True, "message": "已尝试启动隧道（pidfile 尚未就绪，请稍后刷新状态）",
             "running": False}
@@ -315,7 +463,6 @@ def stop_tunnel(root: Path) -> dict:
             killed.append(pid)
         except Exception:
             pass
-    # 兜底：按命令行特征清理 ssh.exe
     for mp in _wmic_marked_pids(cfg):
         if mp not in killed:
             try:
@@ -323,7 +470,6 @@ def stop_tunnel(root: Path) -> dict:
                 killed.append(mp)
             except Exception:
                 pass
-    # 标记关闭
     cfg["enabled"] = False
     save_cfg(root, cfg)
     pf = root / PIDFILE
@@ -339,23 +485,26 @@ def stop_tunnel(root: Path) -> dict:
 # ---------------------------------------------------------------------------
 # 测试：SSH 可达 + 端到端转发验证
 # ---------------------------------------------------------------------------
-def test_ssh_reachable(cfg: dict) -> dict:
-    args = build_ssh_args(cfg)  # 含 -N -T，先去掉 -N -T 换成执行命令
-    # 去掉 -N -T，加命令
-    base = [a for a in build_ssh_args(cfg) if a not in ("-N", "-T")]
-    base += ["echo", "tunnel_ok"]
+def test_ssh_reachable(cfg: dict, root: Path) -> dict:
     try:
-        out = _run([ssh_exe()] + base, timeout=20)
+        exe, base, is_plink = client_invocation(cfg, root)
+    except Exception as exc:
+        return {"ok": False, "reachable": False, "message": str(exc)}
+    # plink 首次未知 host key 需从 stdin 喂 'y' 接受
+    inp = "y\n" if is_plink else None
+    try:
+        out = _run([exe] + base + ["echo", "tunnel_ok"], timeout=25, input_text=inp)
     except Exception as exc:
         return {"ok": False, "reachable": False, "message": "SSH 连接异常: %s" % exc}
     if out.returncode == 0 and "tunnel_ok" in out.stdout:
         return {"ok": True, "reachable": True, "message": "SSH 可达且认证通过"}
-    # 区分常见错误
     err = (out.stderr or out.stdout).strip()
     if "Permission denied" in err:
-        return {"ok": False, "reachable": False, "message": "认证失败（密钥/密码不对或公钥未装到服务器）"}
+        return {"ok": False, "reachable": False,
+                "message": "认证失败（密钥/密码不对或公钥未装到服务器）"}
     if "timed out" in err or "Connection timed out" in err or "Could not resolve" in err:
-        return {"ok": False, "reachable": False, "message": "无法连接服务器（地址/端口/网络不通）"}
+        return {"ok": False, "reachable": False,
+                "message": "无法连接服务器（地址/端口/网络不通）"}
     return {"ok": False, "reachable": False, "message": "SSH 测试未通过: " + err[:200]}
 
 
@@ -365,7 +514,6 @@ def test_forward(root: Path, cfg: dict) -> dict:
     remote = int(cfg.get("remote_port", 18080))
     token = "grok_tunnel_probe_%d" % int(time.time())
 
-    # 尝试在本机 local_port 起临时探针；若端口已被真实业务占用则跳过绑定
     probe = None
     busy = False
     import http.server
@@ -387,32 +535,31 @@ def test_forward(root: Path, cfg: dict) -> dict:
         busy = True
         srv = None
     if srv:
-        t = threading.Thread(target=srv.serve_forever, daemon=True)
-        t.start()
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     try:
-        # 在服务器侧访问 127.0.0.1:remote_port
         remote_cmd = (
             "curl -s -o /dev/null -w 'HTTP_%{http_code}' -m 8 http://127.0.0.1:%d/ "
             "|| python3 -c \"import urllib.request;print('HTTP_'+str(urllib.request.urlopen('http://127.0.0.1:%d/',timeout=8).status))\" 2>/dev/null"
             % (remote, remote)
         )
-        base = [a for a in build_ssh_args(cfg) if a not in ("-N", "-T")]
         try:
-            out = _run([ssh_exe()] + base + [remote_cmd], timeout=30, cwd=str(root))
+            exe, base, is_plink = client_invocation(cfg, root)
+        except Exception as exc:
+            return {"ok": False, "message": str(exc)}
+        inp = "y\n" if is_plink else None
+        try:
+            out = _run([exe] + base + [remote_cmd], timeout=35, cwd=str(root), input_text=inp)
         except Exception as exc:
             return {"ok": False, "message": "服务器侧测试异常: %s" % exc}
         resp = out.stdout.strip()
-        # 若本机探针成功，应能在 stdout 看到 token
         if not busy and token in out.stdout:
             return {"ok": True, "message": "端到端隧道通：服务器 %d 成功回连到本机 %d（探针命中）" % (remote, local)}
         if busy:
-            # 本地端口被真实业务占用：只要服务器侧不是超时，就说明隧道已建立
             if "timed out" in (out.stderr or "") or "Connection timed out" in (out.stderr or ""):
                 return {"ok": False, "message": "隧道转发不通（服务器侧连接超时）"}
             return {"ok": True,
                     "message": "隧道已建立：服务器 %d 能连通本机 %d（本地端口已被业务占用，属正常）" % (remote, local)}
-        # 探针未命中但也没超时：可能转发已建但无监听
         if "timed out" in (out.stderr or "") or "Connection timed out" in (out.stderr or ""):
             return {"ok": False, "message": "隧道转发不通（服务器侧连接超时）"}
         return {"ok": True, "message": "隧道已建立：服务器 %d 可达本机 %d（本地无服务监听属正常）" % (remote, local)}
@@ -429,7 +576,7 @@ def test_tunnel(root: Path, cfg: dict) -> dict:
     if err:
         return {"ok": False, "message": err, "steps": []}
     steps = []
-    r1 = test_ssh_reachable(cfg)
+    r1 = test_ssh_reachable(cfg, root)
     steps.append({"name": "SSH 可达 / 认证", **r1})
     if not r1["ok"]:
         return {"ok": False, "message": r1["message"], "steps": steps}
@@ -451,6 +598,7 @@ def autostart_status(root: Path) -> dict:
         "installed": _task_exists(),
         "task_name": TUNNEL_TASK,
         "is_windows": sys.platform == "win32",
+        "plink": check_plink(root, read_cfg(root)),
         "config": {k: read_cfg(root)[k] for k in
                    ("server", "ssh_port", "user", "auth", "local_port", "remote_port")},
     }
@@ -460,6 +608,8 @@ def install_autostart(root: Path, cfg: dict) -> dict:
     err = _validate(cfg)
     if err:
         return {"ok": False, "message": err}
+    if cfg.get("auth") == "password" and not find_plink(cfg, root):
+        return {"ok": False, "message": "未检测到 plink，无法设置密码模式开机自启，请先安装 plink"}
     save_cfg(root, {**read_cfg(root), **cfg, "enabled": True})
     runner = write_runner(root)
     if sys.platform == "win32":
@@ -489,6 +639,7 @@ def _install_windows(runner: Path) -> dict:
     tr = '"{ps}" -WindowStyle Hidden -ExecutionPolicy Bypass -File "{file}"'.format(
         ps=ps, file=str(runner).replace("/", "\\")
     )
+    # 以当前登录用户身份运行（无需管理员），/RL HIGHEST 提升权利但不强制提权
     out = _run(["schtasks", "/Create", "/TN", TUNNEL_TASK, "/SC", "ONLOGON",
                 "/TR", tr, "/F"], timeout=60)
     if out.returncode != 0:
