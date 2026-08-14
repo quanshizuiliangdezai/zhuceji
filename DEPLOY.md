@@ -1,20 +1,36 @@
 # 一键部署
 
-本项目提供一条命令完成「建虚拟环境 → 装依赖 → 生成配置 → 启动 WebUI」的完整部署。
+本项目提供**一条命令**完成「克隆仓库 → 建虚拟环境 → 装依赖 → 生成配置 → 启动 WebUI」的完整部署。
 
-## 方式一（推荐）：仓库自带脚本
+## 方式一（推荐）：一条命令从零部署
+
+复制粘贴下面任意一条命令到终端运行即可：
 
 ### Windows (PowerShell)
 
-在仓库根目录打开 PowerShell，执行：
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iex (irm https://raw.githubusercontent.com/quanshizuiliangdezai/zhuceji/main/install.ps1)"
+```
+
+### Linux / macOS / Windows Git Bash
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/quanshizuiliangdezai/zhuceji/main/install.sh | bash
+```
+
+运行后访问：**http://127.0.0.1:8092**
+
+## 方式二：仓库已克隆，用内置脚本部署
+
+如果你已经把仓库 clone 下来了，在仓库根目录执行：
+
+### Windows (PowerShell)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File deploy.ps1
 ```
 
 ### Linux / macOS / Windows Git Bash
-
-在仓库根目录执行：
 
 ```bash
 bash deploy.sh
