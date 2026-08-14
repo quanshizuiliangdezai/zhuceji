@@ -28,3 +28,7 @@ screenshots/
 
 *.pending.jsonl
 *.pending.jsonl.lock
+
+# 开机自启启动器（由面板"开机自启"按钮运行时生成，非源码）
+autostart_panel.ps1
+autostart_panel.sh

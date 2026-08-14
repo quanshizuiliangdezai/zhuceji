@@ -56,6 +56,11 @@
 .sso-pool-status .ok{color:var(--green)}
 @media(max-width:760px){.sso-config-grid{grid-template-columns:1fr 1fr}}
 .modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}.modal.show{opacity:1;pointer-events:auto}.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px)}.modal-card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);width:min(420px,92vw);padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}.modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.modal-head h3{margin:0;font-size:16px}.modal-head .ghost{width:32px;height:32px;border-radius:8px;background:transparent;border:1px solid var(--line);color:var(--fg);font-size:18px;cursor:pointer}.modal-head .ghost:hover{background:var(--panel)}.modal-body{display:flex;flex-direction:column;gap:12px}.modal-body .sso-field input{width:100%}.modal-hint{color:var(--muted);font-size:12px;line-height:1.5;margin:0}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.modal-actions button{height:36px;padding:0 16px;border-radius:8px;font-weight:650;cursor:pointer;border:0}.modal-actions button.primary{background:var(--accent);color:#080b00}
+.autostart-box{margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)}
+.autostart-head{font-size:13px;font-weight:700;margin-bottom:8px;color:var(--fg)}
+.autostart-status{font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.5}
+.autostart-status.on{color:var(--green)}
+.autostart-status.off{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -111,8 +116,17 @@
       <label class="sso-field"><span>监听端口</span><input id="panelPort" type="number" value="8092" min="1" max="65535" placeholder="8092"></label>
       <label class="sso-field"><span>Workers</span><input id="panelWorkers" type="number" value="1" min="1" max="8" placeholder="1"></label>
       <p class="modal-hint">修改后保存并重启，服务会切换到新地址。重启完成后页面会自动跳转。</p>
+      <div class="autostart-box">
+        <div class="autostart-head">开机自启</div>
+        <div class="autostart-status" id="autostartStatus">检测中…</div>
+        <p class="modal-hint">点击「设置开机自启」后，登录 Windows 会自动后台启动面板（无需保持窗口 / 浏览器打开）。启动脚本每次运行都会<strong>实时读取当前监听地址与端口</strong>，你在面板改过配置也立即生效，无需重新设置。</p>
+      </div>
     </div>
-    <div class="modal-actions"><button id="saveServerConfigBtn" class="primary">保存并重启</button></div>
+    <div class="modal-actions">
+      <button id="autostartRemoveBtn" class="ghost" type="button">取消开机自启</button>
+      <button id="autostartBtn" class="primary" type="button">设置开机自启</button>
+      <button id="saveServerConfigBtn" class="primary" type="button">保存并重启</button>
+    </div>
   </div>
 </div>
 <script>
@@ -644,6 +658,54 @@ async function saveAndRestartServer() {
   }
 }
 
+async function loadAutostartStatus() {
+  const el = $('autostartStatus');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/server/autostart');
+    const d = await r.json();
+    if (d.ok) {
+      if (d.installed) {
+        el.className = 'autostart-status on';
+        el.textContent = '已启用：登录 Windows 将自动后台启动（' + d.info.host + ':' + d.info.port + '）';
+        if ($('autostartBtn')) $('autostartBtn').textContent = '刷新开机自启';
+      } else {
+        el.className = 'autostart-status off';
+        el.textContent = '未启用：当前不会随登录自动启动。';
+        if ($('autostartBtn')) $('autostartBtn').textContent = '设置开机自启';
+      }
+    }
+  } catch (e) {
+    el.className = 'autostart-status off';
+    el.textContent = '检测失败：' + e.message;
+  }
+}
+
+async function setupAutostart() {
+  try {
+    setNotice('正在设置开机自启…');
+    const r = await fetch('/api/server/autostart/install', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) { setNotice('设置失败: ' + (d.detail || ''), true); return; }
+    setNotice(d.message || '已设置开机自启');
+    loadAutostartStatus();
+  } catch (e) {
+    setNotice('设置异常: ' + e.message, true);
+  }
+}
+
+async function removeAutostart() {
+  try {
+    const r = await fetch('/api/server/autostart/remove', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) { setNotice('取消失败: ' + (d.detail || ''), true); return; }
+    setNotice(d.message || '已取消开机自启');
+    loadAutostartStatus();
+  } catch (e) {
+    setNotice('取消异常: ' + e.message, true);
+  }
+}
+
 function bind() {
   renderFields(); applyLanguage();
   $('langZh').onclick = () => setLanguage('zh'); $('langEn').onclick = () => setLanguage('en');
@@ -657,8 +719,13 @@ function bind() {
   if (closeServerModal) closeServerModal.onclick = closeServerSettings;
   const saveServerConfigBtn = $('saveServerConfigBtn');
   if (saveServerConfigBtn) saveServerConfigBtn.onclick = saveAndRestartServer;
+  const autostartBtn = $('autostartBtn');
+  if (autostartBtn) autostartBtn.onclick = setupAutostart;
+  const autostartRemoveBtn = $('autostartRemoveBtn');
+  if (autostartRemoveBtn) autostartRemoveBtn.onclick = removeAutostart;
   loadConfig().catch(e => setNotice(e.message, true));
   loadServerConfig();
+  loadAutostartStatus();
   bindSso(); loadSso();
   pollStatus(); pollLogs(); loadPoolStatus();
   setInterval(pollStatus, 1000); setInterval(pollLogs, 1000); setInterval(loadPoolStatus, 10000);

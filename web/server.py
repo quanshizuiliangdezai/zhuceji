@@ -204,6 +204,32 @@ def restart_server(background_tasks: BackgroundTasks):
     return {"ok": True, "message": "服务正在重启到 %s:%d" % (cfg["host"], cfg["port"])}
 
 
+@app.get("/api/server/autostart")
+def get_autostart_status():
+    from web import autostart_helper as ah
+    return ah.autostart_status(ROOT)
+
+
+@app.post("/api/server/autostart/install")
+def install_autostart():
+    from web import autostart_helper as ah
+    try:
+        result = ah.install_task(ROOT)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="设置开机自启失败: %s" % exc) from exc
+    return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
+
+
+@app.post("/api/server/autostart/remove")
+def remove_autostart():
+    from web import autostart_helper as ah
+    try:
+        result = ah.remove_task()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="取消开机自启失败: %s" % exc) from exc
+    return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
+
+
 @app.get("/api/config")
 def get_config():
     return {"ok": True, "config": _load_config_if_idle()}
