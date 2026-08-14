@@ -10,6 +10,46 @@
 @media(max-width:1050px){.main-grid{grid-template-columns:1fr}.terminal-body{height:420px}.terminal-panel{min-height:auto}}
 @media(max-width:760px){.topbar{height:auto;min-height:62px;padding:10px 14px;flex-wrap:wrap}.brand{order:1}.spacer{display:none}.lang-switch{margin-left:auto;order:1}.action{order:2;height:36px;padding:0 12px}.page{padding:18px 12px 30px}.stats{grid-template-columns:repeat(2,1fr);gap:10px}.stat{height:96px;padding:15px}.main-grid{gap:14px}.grid{grid-template-columns:1fr}.field.full,.check-row,.check-help{grid-column:1}.section{padding:18px 16px}.tab{padding:0 14px}}
 @media(max-width:430px){.brand-name{font-size:16px}.repo-pill{padding:4px 7px}.repo-pill span{display:none}.stats{grid-template-columns:1fr 1fr}.stat-value{font-size:25px}.action .btn-text{display:none}.action{width:42px;justify-content:center;padding:0}.terminal-actions .mini-label{display:none}}
+.sso-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.sso-title{font-size:18px;font-weight:700;margin:0;letter-spacing:-.02em}
+.sso-sub{color:var(--muted);font-size:12px;margin-top:4px}
+.sso-actions{display:flex;gap:10px;flex-wrap:wrap}
+.sso-list{display:flex;flex-direction:column;gap:14px;max-height:560px;overflow-y:auto;padding-right:4px}
+.sso-card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.sso-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
+.sso-email{font-weight:700;font-size:15px;word-break:break-all}
+.sso-meta{color:var(--muted);font-size:12px;margin:4px 0 10px;word-break:break-all}
+.sso-token{position:relative;background:var(--panel3);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all;color:var(--soft);max-height:120px;overflow-y:auto;user-select:all}
+.sso-card-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+.sso-card-actions button{height:34px;padding:0 14px;border-radius:8px;font-weight:650;font-size:13px}
+.sso-card-actions button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.sso-card-actions button.ghost:hover{background:var(--panel)}
+.sso-badge{font-size:11px;padding:2px 9px;border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.sso-badge.ok{color:var(--green);border-color:var(--green)}
+.sso-badge.warn{color:var(--warn);border-color:var(--warn)}
+.sso-badge.expired{color:var(--red);border-color:var(--red)}
+.sso-empty{text-align:center;color:var(--muted);padding:50px 0;font-size:14px}
+.sso-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:100}
+.sso-toast.show{opacity:1}
+.sso-config{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:18px}
+.sso-config-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.sso-config-title{font-size:15px;font-weight:700}
+.sso-config-state{font-size:12px;color:var(--muted)}
+.sso-config-state.bad{color:var(--red)}
+.sso-config-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.sso-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+.sso-field input{height:34px;border-radius:8px;border:1px solid var(--line);background:var(--panel3);color:var(--fg);padding:0 10px;font-size:13px}
+.sso-field input:focus{outline:none;border-color:var(--accent)}
+.sso-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;flex-wrap:wrap}
+.sso-check{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--soft);cursor:pointer}
+.sso-config-actions{display:flex;gap:8px}
+.sso-config-actions button{height:34px;padding:0 16px;border-radius:8px;font-weight:650;font-size:13px;cursor:pointer}
+.sso-config-actions button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.sso-config-actions button.ghost:hover{background:var(--panel)}
+.sso-config-actions button:not(.ghost){background:var(--accent);color:#080b00;border:0}
+.sso-config-actions button:not(.ghost):hover{background:var(--accent2)}
+.sso-discover-hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5;white-space:pre-wrap;min-height:0}
+@media(max-width:760px){.sso-config-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -56,36 +96,316 @@
   <div class="footer-note"><span data-i18n="localOnly">本地 WebUI · 127.0.0.1:8092</span><span id="saveState"></span></div>
 </main>
 <script>
-const $=id=>document.getElementById(id);
-const icons={basic:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>',mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',pool:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 20 7-7M14 6l4-4 4 4-4 4M13 7l4 4"/><path d="M7 17 3 21"/></svg>',cpa:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6l8-3Z"/></svg>'};
-const i18n={
- zh:{console:'控制台',save:'保存配置',start:'开始注册',stop:'停止任务',jobStatus:'任务状态',target:'目标数量',success:'成功数量',failed:'失败数量',pending:'待恢复',warnings:'警告',idle:'待机中',running:'运行中',stopped:'已停止',liveLog:'实时控制台日志',copyLog:'复制日志',clearLog:'清空日志',logReady:'[*] 控制台已就绪，等待指令...',localOnly:'本地 WebUI · 127.0.0.1:8092',saved:'配置已保存',noChanges:'没有需要保存的修改',saveFailed:'配置保存失败',loadFailed:'配置加载失败',startFailed:'启动失败',stopFailed:'停止失败',stopSent:'已发送停止请求',noJob:'当前没有运行中的任务',copied:'日志已复制',copyFailed:'复制失败',tabBasic:'任务参数',tabMail:'邮箱服务',tabPool:'grok2api 池',tabCpa:'CPA 导出',
- fields:{register_count:['注册数量','要创建的账号总数。'],multi_thread_enabled:['启用多线程注册',''],multi_thread_workers:['多线程 Worker 数','并行浏览器线程数（1–8 Worker）。'],enable_nsfw:['启用 NSFW（后处理开关）',''],proxy:['代理地址（可选）','留空表示使用直连网络。'],user_agent:['自定义 User-Agent（可选）',''],email_provider:['邮箱服务商','选择验证码邮箱来源。'],duckmail_api_key:['DuckMail API Key','可选。'],yyds_api_key:['YYDS API Key',''],yyds_jwt:['YYDS JWT',''],cloudflare_api_base:['Cloudflare API Base',''],cloudflare_api_key:['Cloudflare API Key / Admin Password',''],cloudflare_auth_mode:['Cloudflare 鉴权模式',''],cloudflare_path_domains:['Cloudflare 域名路径',''],cloudflare_path_accounts:['Cloudflare 创建邮箱路径',''],cloudflare_path_token:['Cloudflare Token 路径',''],cloudflare_path_messages:['Cloudflare 邮件路径',''],defaultDomains:['默认域名（逗号分隔）',''],cloudmail_api_base:['Cloud Mail API Base',''],cloudmail_public_token:['Cloud Mail Public Token',''],cloudmail_domains:['Cloud Mail 域名',''],cloudmail_path_messages:['Cloud Mail 邮件路径',''],grok2api_auto_add_local:['自动写入本地池',''],grok2api_local_token_file:['本地 Token 文件',''],grok2api_pool_name:['Token 池',''],grok2api_auto_add_remote:['自动写入远端池',''],grok2api_remote_base:['远端 Base URL',''],grok2api_remote_app_key:['旧版 App Key',''],grok2api_remote_admin_username:['新版管理员账号',''],grok2api_remote_admin_password:['新版管理员密码',''],grok2api_allow_legacy_full_save:['允许旧版全量保存回退',''],cpa_export_enabled:['启用 CPA/OIDC 导出',''],cpa_auth_dir:['CPA 输出目录',''],cpa_copy_to_hotload:['复制到热加载目录',''],cpa_hotload_dir:['热加载目录',''],cpa_base_url:['CPA Base URL',''],cpa_proxy:['CPA 专用代理',''],cpa_headless:['CPA 无头模式',''],cpa_force_standalone:['CPA 独立浏览器',''],cpa_mint_timeout_sec:['CPA 授权整体超时（秒）','30–1800 秒。'],cpa_mint_cookie_inject:['注入已有 Cookie',''],cpa_oidc_request_timeout_sec:['OIDC 请求超时（秒）','3–120 秒。'],cpa_oidc_poll_timeout_sec:['OIDC 轮询超时（秒）','3–120 秒。'],api_reverse_tools:['外部 cpa_xai 工具目录','']}}
- ,en:{console:'Console',save:'Save config',start:'Start registration',stop:'Stop job',jobStatus:'Job status',target:'Target',success:'Successful',failed:'Failed',pending:'Pending',warnings:'Warnings',idle:'Idle',running:'Running',stopped:'Stopped',liveLog:'Live console log',copyLog:'Copy log',clearLog:'Clear log',logReady:'[*] Console ready, waiting for command...',localOnly:'Local WebUI · 127.0.0.1:8092',saved:'Configuration saved',noChanges:'No changes to save',saveFailed:'Failed to save configuration',loadFailed:'Failed to load configuration',startFailed:'Failed to start',stopFailed:'Failed to stop',stopSent:'Stop request sent',noJob:'No job is currently running',copied:'Log copied',copyFailed:'Failed to copy log',tabBasic:'Task parameters',tabMail:'Mail service',tabPool:'grok2api pool',tabCpa:'CPA export',
- fields:{register_count:['Registration count','Total number of accounts to create.'],multi_thread_enabled:['Enable multi-thread registration',''],multi_thread_workers:['Worker count','Parallel browser workers (1–8).'],enable_nsfw:['Enable NSFW (post-process)',''],proxy:['Proxy (optional)','Leave empty to use a direct connection.'],user_agent:['Custom User-Agent (optional)',''],email_provider:['Mail provider','Choose the mailbox used to receive verification codes.'],duckmail_api_key:['DuckMail API Key','Optional.'],yyds_api_key:['YYDS API Key',''],yyds_jwt:['YYDS JWT',''],cloudflare_api_base:['Cloudflare API Base',''],cloudflare_api_key:['Cloudflare API Key / Admin Password',''],cloudflare_auth_mode:['Cloudflare auth mode',''],cloudflare_path_domains:['Cloudflare domains path',''],cloudflare_path_accounts:['Cloudflare create-address path',''],cloudflare_path_token:['Cloudflare token path',''],cloudflare_path_messages:['Cloudflare messages path',''],defaultDomains:['Default domains (comma-separated)',''],cloudmail_api_base:['Cloud Mail API Base',''],cloudmail_public_token:['Cloud Mail Public Token',''],cloudmail_domains:['Cloud Mail domains',''],cloudmail_path_messages:['Cloud Mail messages path',''],grok2api_auto_add_local:['Auto-add to local pool',''],grok2api_local_token_file:['Local token file',''],grok2api_pool_name:['Token pool',''],grok2api_auto_add_remote:['Auto-add to remote pool',''],grok2api_remote_base:['Remote Base URL',''],grok2api_remote_app_key:['Legacy App Key',''],grok2api_remote_admin_username:['Admin username',''],grok2api_remote_admin_password:['Admin password',''],grok2api_allow_legacy_full_save:['Allow legacy full-save fallback',''],cpa_export_enabled:['Enable CPA/OIDC export',''],cpa_auth_dir:['CPA output directory',''],cpa_copy_to_hotload:['Copy to hot-load directory',''],cpa_hotload_dir:['Hot-load directory',''],cpa_base_url:['CPA Base URL',''],cpa_proxy:['CPA proxy',''],cpa_headless:['CPA headless mode',''],cpa_force_standalone:['CPA standalone browser',''],cpa_mint_timeout_sec:['CPA authorization timeout (seconds)','30–1800 seconds.'],cpa_mint_cookie_inject:['Inject existing Cookie',''],cpa_oidc_request_timeout_sec:['OIDC request timeout (seconds)','3–120 seconds.'],cpa_oidc_poll_timeout_sec:['OIDC poll timeout (seconds)','3–120 seconds.'],api_reverse_tools:['External cpa_xai tools directory','']}}
+const $ = id => document.getElementById(id);
+const icons = {
+  basic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+  pool: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 20 7-7M14 6l4-4 4 4-4 4M13 7l4 4"/><path d="M7 17 3 21"/></svg>',
+  cpa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 20 6v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg>',
+  sso: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="12" r="1.5"/><path d="M16.5 7.5v9"/><path d="M20 10.5v3"/></svg>'
 };
-const fieldDefs={basic:[['register_count','number',{min:1,max:2500}],['multi_thread_workers','number',{min:1,max:8}],['multi_thread_enabled','checkbox'],['enable_nsfw','checkbox'],['proxy','text','full'],['user_agent','text','full']],mail:[['email_provider','select',['duckmail','yyds','cloudflare','cloudmail']],['duckmail_api_key','password'],['yyds_api_key','password'],['yyds_jwt','password'],['cloudflare_api_base','text','full'],['cloudflare_api_key','password'],['cloudflare_auth_mode','select',['none','bearer','x-api-key','x-admin-auth','query-key']],['cloudflare_path_domains','text'],['cloudflare_path_accounts','text'],['cloudflare_path_token','text'],['cloudflare_path_messages','text'],['defaultDomains','text','full'],['cloudmail_api_base','text','full'],['cloudmail_public_token','password'],['cloudmail_domains','text'],['cloudmail_path_messages','text','full']],pool:[['grok2api_auto_add_local','checkbox'],['grok2api_local_token_file','text'],['grok2api_pool_name','select',['ssoBasic','ssoSuper']],['grok2api_auto_add_remote','checkbox'],['grok2api_remote_base','text','full'],['grok2api_remote_app_key','password'],['grok2api_remote_admin_username','text'],['grok2api_remote_admin_password','password'],['grok2api_allow_legacy_full_save','checkbox']],cpa:[['cpa_export_enabled','checkbox'],['cpa_auth_dir','text'],['cpa_copy_to_hotload','checkbox'],['cpa_hotload_dir','text'],['cpa_base_url','text','full'],['cpa_proxy','text','full'],['cpa_headless','checkbox'],['cpa_force_standalone','checkbox'],['cpa_mint_timeout_sec','number',{min:30,max:1800}],['cpa_mint_cookie_inject','checkbox'],['cpa_oidc_request_timeout_sec','number',{min:3,max:120}],['cpa_oidc_poll_timeout_sec','number',{min:3,max:120}],['api_reverse_tools','text','full']]};
-const tabMeta={basic:['tabBasic','basic'],mail:['tabMail','mail'],pool:['tabPool','pool'],cpa:['tabCpa','cpa']};
-let lang=localStorage.getItem('grok_register_lang')==='en'?'en':'zh',dirty=new Set(),lastSeq=0,running=false,serverLatest=0,lastStatus={cancelled:false};
-function t(key){return i18n[lang][key]||i18n.zh[key]||key}
-function renderFields(){const tabs=$('tabs'),sections=$('sections');tabs.innerHTML='';sections.innerHTML='';let first=true;for(const [section,defs] of Object.entries(fieldDefs)){const [tabKey,iconKey]=tabMeta[section];const tab=document.createElement('button');tab.type='button';tab.className='tab'+(first?' active':'');tab.dataset.target='sec-'+section;tab.dataset.tabkey=tabKey;tab.innerHTML=icons[iconKey]+'<span>'+t(tabKey)+'</span>';tabs.appendChild(tab);const box=document.createElement('div');box.className='section'+(first?' active':'');box.id='sec-'+section;const grid=document.createElement('div');grid.className='grid';box.appendChild(grid);sections.appendChild(box);for(const [key,type,extra] of defs){const label=(i18n[lang].fields[key]||[key,''])[0],help=(i18n[lang].fields[key]||[key,''])[1];if(type==='checkbox'){const row=document.createElement('label');row.className='check-row';const input=document.createElement('input');input.type='checkbox';input.id=key;const text=document.createElement('span');text.textContent=label;row.append(input,text);grid.appendChild(row);if(help){const h=document.createElement('div');h.className='check-help';h.textContent=help;grid.appendChild(h)}input.addEventListener('change',()=>dirty.add(key));continue}const wrap=document.createElement('div');wrap.className='field'+(extra==='full'?' full':'');const lab=document.createElement('label');lab.className='field-label';lab.htmlFor=key;lab.textContent=label;let input;if(type==='select'){input=document.createElement('select');for(const value of extra){const o=document.createElement('option');o.value=value;o.textContent=value;input.appendChild(o)}}else{input=document.createElement('input');input.type=type;const opt=extra&&typeof extra==='object'?extra:{};if(opt.min!==undefined)input.min=opt.min;if(opt.max!==undefined)input.max=opt.max}input.id=key;const helper=document.createElement('div');helper.className='field-help';helper.textContent=help;wrap.append(lab,input,helper);grid.appendChild(wrap);input.addEventListener('input',()=>dirty.add(key));input.addEventListener('change',()=>dirty.add(key))}first=false}tabs.addEventListener('click',e=>{const tab=e.target.closest('.tab');if(!tab)return;document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));tab.classList.add('active');$(tab.dataset.target).classList.add('active')})}
-function applyLanguage(){document.documentElement.lang=lang==='zh'?'zh-CN':'en';document.querySelectorAll('[data-i18n]').forEach(el=>{el.textContent=t(el.dataset.i18n)});$('langZh').classList.toggle('active',lang==='zh');$('langEn').classList.toggle('active',lang==='en');for(const [key,[tabKey]] of Object.entries(tabMeta)){const tab=document.querySelector('[data-tabkey="'+tabKey+'"] span');if(tab)tab.textContent=t(tabKey)}for(const defs of Object.values(fieldDefs)){for(const [key,type] of defs){const el=$(key);if(!el)continue;const [label,help]=i18n[lang].fields[key]||[key,''];if(type==='checkbox'){const span=el.parentElement.querySelector('span');if(span)span.textContent=label;const h=el.parentElement.nextElementSibling;if(h&&h.classList.contains('check-help'))h.textContent=help}else{const wrap=el.parentElement;const lab=wrap.querySelector('.field-label'),h=wrap.querySelector('.field-help');if(lab)lab.textContent=label;if(h)h.textContent=help}}}updateStatusText(lastStatus)}
-function setLanguage(next){lang=next;localStorage.setItem('grok_register_lang',lang);applyLanguage()}
-function setNotice(text,bad=false){const n=$('notice');n.textContent=text||'';n.className='notice'+(bad?' error':'')}
-function setFormDisabled(disabled){document.querySelectorAll('#sections input,#sections select').forEach(el=>el.disabled=disabled);$('saveBtn').disabled=disabled;$('startBtn').disabled=disabled;$('stopBtn').hidden=!disabled}
-function applyConfig(cfg){for(const defs of Object.values(fieldDefs)){for(const [key,type] of defs){const el=$(key);if(!el||!(key in cfg))continue;if(type==='checkbox')el.checked=!!cfg[key];else el.value=cfg[key]??''}}dirty.clear()}
-function readValue(key){const el=$(key);if(!el)return undefined;if(el.type==='checkbox')return el.checked;if(el.type==='number')return Number.parseInt(el.value,10);return el.value}
-async function loadConfig(){const r=await fetch('/api/config');if(!r.ok)throw new Error((await r.json()).detail||t('loadFailed'));const d=await r.json();applyConfig(d.config||{})}
-async function saveConfig(){if(running)return false;const payload={};for(const key of dirty)payload[key]=readValue(key);if(!Object.keys(payload).length){setNotice(t('noChanges'));return true}const r=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok){setNotice(d.detail||t('saveFailed'),true);return false}applyConfig(d.config||{});setNotice(t('saved'));$('saveState').textContent=t('saved');setTimeout(()=>{$('saveState').textContent=''},1800);return true}
-async function startJob(){if(dirty.size&&!await saveConfig())return;setNotice('');const r=await fetch('/api/start',{method:'POST'});const d=await r.json();if(!r.ok){setNotice(d.detail||t('startFailed'),true);return}await pollStatus()}
-async function stopJob(){const r=await fetch('/api/stop',{method:'POST'});const d=await r.json();if(!r.ok)setNotice(d.detail||t('stopFailed'),true);else setNotice(d.stopped?t('stopSent'):t('noJob'))}
-function appendLine(entry){const body=$('terminal'),empty=$('emptyLog');if(empty)empty.remove();const nearBottom=body.scrollHeight-body.scrollTop-body.clientHeight<80;const div=document.createElement('div');div.className='line';const line=String(entry.line||'');if(line.includes('[+]'))div.classList.add('ok');else if(line.includes('[!]'))div.classList.add('bad');else if(line.includes('[*]'))div.classList.add('info');else if(line.toLowerCase().includes('warn'))div.classList.add('warn');div.textContent=line;body.appendChild(div);while(body.children.length>2000)body.removeChild(body.firstChild);if(nearBottom)body.scrollTop=body.scrollHeight}
-async function pollLogs(){try{const r=await fetch('/api/logs?after='+lastSeq);if(!r.ok)return;const d=await r.json();serverLatest=d.latest||lastSeq;for(const e of d.entries||[]){appendLine(e);lastSeq=Math.max(lastSeq,Number(e.seq)||0)}}catch(_){}}
-function updateStatusText(s={}){lastStatus=s;const dot=$('statusDot');dot.className='status-dot'+(running?' running':(s.cancelled?' cancelled':''));$('sStatus').textContent=running?t('running'):(s.cancelled?t('stopped'):t('idle'));$('startBtn').hidden=running;$('stopBtn').hidden=!running}
-async function pollStatus(){try{const r=await fetch('/api/status');if(!r.ok)return;const s=await r.json();running=!!s.running;$('sTarget').textContent=s.target||0;$('sSuccess').textContent=s.success||0;$('sFail').textContent=s.fail||0;$('sPending').textContent=s.pending||0;$('sWarnings').textContent=s.warnings||0;updateStatusText(s);setFormDisabled(running);if(s.error)setNotice(s.error,true)}catch(_){}}
-async function copyLogs(){const text=[...$('terminal').querySelectorAll('.line')].map(x=>x.textContent).join('\n');try{await navigator.clipboard.writeText(text);setNotice(t('copied'))}catch(_){setNotice(t('copyFailed'),true)}}
-function clearLogs(){const body=$('terminal');body.innerHTML='<div id="emptyLog" class="empty-log">'+t('logReady')+'</div>';lastSeq=serverLatest}
-function bind(){renderFields();applyLanguage();$('langZh').onclick=()=>setLanguage('zh');$('langEn').onclick=()=>setLanguage('en');$('saveBtn').onclick=()=>saveConfig().catch(e=>setNotice(e.message,true));$('startBtn').onclick=()=>startJob().catch(e=>setNotice(e.message,true));$('stopBtn').onclick=()=>stopJob().catch(e=>setNotice(e.message,true));$('copyBtn').onclick=()=>copyLogs();$('clearBtn').onclick=()=>clearLogs();loadConfig().catch(e=>setNotice(e.message,true));pollStatus();pollLogs();setInterval(pollStatus,1000);setInterval(pollLogs,1000)}
+const i18n = {
+  zh: {
+    console: '控制台', save: '保存配置', start: '开始注册', stop: '停止任务', jobStatus: '任务状态', target: '目标数量', success: '成功数量', failed: '失败数量', pending: '待恢复', warnings: '警告', idle: '待机中', running: '运行中', stopped: '已停止', liveLog: '实时控制台日志', copyLog: '复制日志', clearLog: '清空日志', logReady: '[*] 控制台已就绪，等待指令...', localOnly: '本地 WebUI · 127.0.0.1:8092', saved: '配置已保存', noChanges: '没有需要保存的修改', saveFailed: '配置保存失败', loadFailed: '配置加载失败', startFailed: '启动失败', stopFailed: '停止失败', stopSent: '已发送停止请求', noJob: '当前没有运行中的任务', copied: '日志已复制', copyFailed: '复制失败', tabBasic: '任务参数', tabMail: '邮箱服务', tabPool: 'grok2api 池', tabCpa: 'CPA 导出', tabSso: 'SSO 账号',
+    sso: { title: 'SSO 账号', sub: '读取 cpa_auths/*.json · 复制 SSO Key 或生成 sub2api 导入 JSON', refresh: '刷新', exportAll: '全部生成 sub2api JSON', empty: '暂无账号。先在 grok-register 注册，cpa_auths/ 下会生成 xai-*.json。', loadFailed: '加载失败', copy: '复制 SSO Key', export: '生成 sub2api JSON', copied: '已复制 SSO Key', copyFailed: '复制失败', exportOk: '已生成，去 sub2api 后台「批量创建账号」上传', exportFailed: '生成失败' },
+    fields: { register_count: ['注册数量','要创建的账号总数。'], multi_thread_enabled: ['启用多线程注册',''], multi_thread_workers: ['多线程 Worker 数','并行浏览器线程数（1–8 Worker）。'], enable_nsfw: ['启用 NSFW（后处理开关）',''], proxy: ['代理地址（可选）','留空表示使用直连网络。'], user_agent: ['自定义 User-Agent（可选）',''], email_provider: ['邮箱服务商','选择验证码邮箱来源。'], duckmail_api_key: ['DuckMail API Key','可选。'], yyds_api_key: ['YYDS API Key',''], yyds_jwt: ['YYDS JWT',''], cloudflare_api_base: ['Cloudflare API Base',''], cloudflare_api_key: ['Cloudflare API Key / Admin Password',''], cloudflare_auth_mode: ['Cloudflare 鉴权模式',''], cloudflare_path_domains: ['Cloudflare 域名路径',''], cloudflare_path_accounts: ['Cloudflare 创建邮箱路径',''], cloudflare_path_token: ['Cloudflare Token 路径',''], cloudflare_path_messages: ['Cloudflare 邮件路径',''], defaultDomains: ['默认域名（逗号分隔）',''], cloudmail_api_base: ['Cloud Mail API Base',''], cloudmail_public_token: ['Cloud Mail Public Token',''], cloudmail_domains: ['Cloud Mail 域名',''], cloudmail_path_messages: ['Cloud Mail 邮件路径',''], grok2api_auto_add_local: ['自动写入本地池',''], grok2api_local_token_file: ['本地 Token 文件',''], grok2api_pool_name: ['Token 池',''], grok2api_auto_add_remote: ['自动写入远端池',''], grok2api_remote_base: ['远端 Base URL',''], grok2api_remote_app_key: ['旧版 App Key',''], grok2api_remote_admin_username: ['新版管理员账号',''], grok2api_remote_admin_password: ['新版管理员密码',''], grok2api_allow_legacy_full_save: ['允许旧版全量保存回退',''], cpa_export_enabled: ['启用 CPA/OIDC 导出',''], cpa_auth_dir: ['CPA 输出目录',''], cpa_copy_to_hotload: ['复制到热加载目录',''], cpa_hotload_dir: ['热加载目录',''], cpa_base_url: ['CPA Base URL',''], cpa_proxy: ['CPA 专用代理',''], cpa_headless: ['CPA 无头模式',''], cpa_force_standalone: ['CPA 独立浏览器',''], cpa_mint_timeout_sec: ['CPA 授权整体超时（秒）','30–1800 秒。'], cpa_mint_cookie_inject: ['注入已有 Cookie',''], cpa_oidc_request_timeout_sec: ['OIDC 请求超时（秒）','3–120 秒。'], cpa_oidc_poll_timeout_sec: ['OIDC 轮询超时（秒）','3–120 秒。'], api_reverse_tools: ['外部 cpa_xai 工具目录',''] }
+  },
+  en: {
+    console: 'Console', save: 'Save config', start: 'Start registration', stop: 'Stop job', jobStatus: 'Job status', target: 'Target', success: 'Successful', failed: 'Failed', pending: 'Pending', warnings: 'Warnings', idle: 'Idle', running: 'Running', stopped: 'Stopped', liveLog: 'Live console log', copyLog: 'Copy log', clearLog: 'Clear log', logReady: '[*] Console ready, waiting for command...', localOnly: 'Local WebUI · 127.0.0.1:8092', saved: 'Configuration saved', noChanges: 'No changes to save', saveFailed: 'Failed to save configuration', loadFailed: 'Failed to load configuration', startFailed: 'Failed to start', stopFailed: 'Failed to stop', stopSent: 'Stop request sent', noJob: 'No job is currently running', copied: 'Log copied', copyFailed: 'Failed to copy log', tabBasic: 'Task parameters', tabMail: 'Mail service', tabPool: 'grok2api pool', tabCpa: 'CPA export', tabSso: 'SSO accounts',
+    sso: { title: 'SSO accounts', sub: 'Read cpa_auths/*.json · Copy SSO Key or generate sub2api import JSON', refresh: 'Refresh', exportAll: 'Generate sub2api JSON', empty: 'No accounts yet. Register with grok-register first to create xai-*.json in cpa_auths/.', loadFailed: 'Failed to load', copy: 'Copy SSO Key', export: 'Generate sub2api JSON', copied: 'SSO Key copied', copyFailed: 'Copy failed', exportOk: 'Generated. Upload to sub2api admin "Batch create accounts".', exportFailed: 'Generation failed' },
+    fields: { register_count: ['Registration count','Total number of accounts to create.'], multi_thread_enabled: ['Enable multi-thread registration',''], multi_thread_workers: ['Worker count','Parallel browser workers (1–8).'], enable_nsfw: ['Enable NSFW (post-process)',''], proxy: ['Proxy (optional)','Leave empty to use a direct connection.'], user_agent: ['Custom User-Agent (optional)',''], email_provider: ['Mail provider','Choose the mailbox used to receive verification codes.'], duckmail_api_key: ['DuckMail API Key','Optional.'], yyds_api_key: ['YYDS API Key',''], yyds_jwt: ['YYDS JWT',''], cloudflare_api_base: ['Cloudflare API Base',''], cloudflare_api_key: ['Cloudflare API Key / Admin Password',''], cloudflare_auth_mode: ['Cloudflare auth mode',''], cloudflare_path_domains: ['Cloudflare domains path',''], cloudflare_path_accounts: ['Cloudflare create-address path',''], cloudflare_path_token: ['Cloudflare token path',''], cloudflare_path_messages: ['Cloudflare messages path',''], defaultDomains: ['Default domains (comma-separated)',''], cloudmail_api_base: ['Cloud Mail API Base',''], cloudmail_public_token: ['Cloud Mail Public Token',''], cloudmail_domains: ['Cloud Mail domains',''], cloudmail_path_messages: ['Cloud Mail messages path',''], grok2api_auto_add_local: ['Auto-add to local pool',''], grok2api_local_token_file: ['Local token file',''], grok2api_pool_name: ['Token pool',''], grok2api_auto_add_remote: ['Auto-add to remote pool',''], grok2api_remote_base: ['Remote Base URL',''], grok2api_remote_app_key: ['Legacy App Key',''], grok2api_remote_admin_username: ['Admin username',''], grok2api_remote_admin_password: ['Admin password',''], grok2api_allow_legacy_full_save: ['Allow legacy full-save fallback',''], cpa_export_enabled: ['Enable CPA/OIDC export',''], cpa_auth_dir: ['CPA output directory',''], cpa_copy_to_hotload: ['Copy to hot-load directory',''], cpa_hotload_dir: ['Hot-load directory',''], cpa_base_url: ['CPA Base URL',''], cpa_proxy: ['CPA proxy',''], cpa_headless: ['CPA headless mode',''], cpa_force_standalone: ['CPA standalone browser',''], cpa_mint_timeout_sec: ['CPA mint timeout (sec)','30–1800 seconds.'], cpa_mint_cookie_inject: ['Inject existing cookie',''], cpa_oidc_request_timeout_sec: ['OIDC request timeout (sec)','3–120 seconds.'], cpa_oidc_poll_timeout_sec: ['OIDC poll timeout (sec)','3–120 seconds.'], api_reverse_tools: ['External cpa_xai tool directory',''] }
+  }
+};
+const fieldDefs = {
+  basic: [['register_count','number',{min:1,max:2500}],['multi_thread_workers','number',{min:1,max:8}],['multi_thread_enabled','checkbox'],['enable_nsfw','checkbox'],['proxy','text','full'],['user_agent','text','full']],
+  mail: [['email_provider','select',['duckmail','yyds','cloudflare','cloudmail']],['duckmail_api_key','password'],['yyds_api_key','password'],['yyds_jwt','password'],['cloudflare_api_base','text','full'],['cloudflare_api_key','password'],['cloudflare_auth_mode','select',['none','bearer','x-api-key','x-admin-auth','query-key']],['cloudflare_path_domains','text'],['cloudflare_path_accounts','text'],['cloudflare_path_token','text'],['cloudflare_path_messages','text'],['defaultDomains','text','full'],['cloudmail_api_base','text','full'],['cloudmail_public_token','password'],['cloudmail_domains','text'],['cloudmail_path_messages','text','full']],
+  pool: [['grok2api_auto_add_local','checkbox'],['grok2api_local_token_file','text'],['grok2api_pool_name','select',['ssoBasic','ssoSuper']],['grok2api_auto_add_remote','checkbox'],['grok2api_remote_base','text','full'],['grok2api_remote_app_key','password'],['grok2api_remote_admin_username','text'],['grok2api_remote_admin_password','password'],['grok2api_allow_legacy_full_save','checkbox']],
+  cpa: [['cpa_export_enabled','checkbox'],['cpa_auth_dir','text'],['cpa_copy_to_hotload','checkbox'],['cpa_hotload_dir','text'],['cpa_base_url','text','full'],['cpa_proxy','text','full'],['cpa_headless','checkbox'],['cpa_force_standalone','checkbox'],['cpa_mint_timeout_sec','number',{min:30,max:1800}],['cpa_mint_cookie_inject','checkbox'],['cpa_oidc_request_timeout_sec','number',{min:3,max:120}],['cpa_oidc_poll_timeout_sec','number',{min:3,max:120}],['api_reverse_tools','text','full']],
+  sso: []
+};
+const tabMeta = { basic: ['tabBasic','basic'], mail: ['tabMail','mail'], pool: ['tabPool','pool'], cpa: ['tabCpa','cpa'], sso: ['tabSso','sso'] };
+let lang = localStorage.getItem('grok_register_lang') === 'en' ? 'en' : 'zh';
+let dirty = new Set(), lastSeq = 0, running = false, serverLatest = 0, lastStatus = { cancelled: false };
+function t(key) { return i18n[lang][key] || i18n.zh[key] || key; }
+function ts(key) { return (i18n[lang].sso || i18n.zh.sso)[key] || key; }
+
+function renderFields() {
+  const tabs = $('tabs'), sections = $('sections');
+  tabs.innerHTML = ''; sections.innerHTML = '';
+  let first = true;
+  for (const [section, defs] of Object.entries(fieldDefs)) {
+    const [tabKey, iconKey] = tabMeta[section];
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'tab' + (first ? ' active' : '');
+    tab.dataset.target = 'sec-' + section;
+    tab.dataset.tabkey = tabKey;
+    tab.innerHTML = icons[iconKey] + '<span>' + t(tabKey) + '</span>';
+    tab.onclick = () => switchTab(section);
+    tabs.appendChild(tab);
+
+    const box = document.createElement('div');
+    box.className = 'section' + (first ? ' active' : '');
+    box.id = 'sec-' + section;
+    if (section === 'sso') {
+      box.innerHTML = '<div class="sso-head"><div><div class="sso-title">' + ts('title') + '</div><div class="sso-sub">' + ts('sub') + '</div></div><div class="sso-actions"><button class="ghost" id="ssoExportAllBtn">' + ts('exportAll') + '</button><button class="ghost" id="ssoRefreshBtn">' + ts('refresh') + '</button></div></div>'
+        + '<div class="sso-config">'
+        + '<div class="sso-config-head"><div class="sso-config-title">sub2api 账号池同步</div><span class="sso-config-state" id="ssoSyncState"></span></div>'
+        + '<div class="sso-config-grid">'
+        + '<label class="sso-field"><span>sub2api 地址</span><input id="sub2apiBaseUrl" placeholder="http://59.49.48.147:15005"></label>'
+        + '<label class="sso-field"><span>管理员邮箱</span><input id="sub2apiEmail" placeholder="zzy1337005740@gmail.com"></label>'
+        + '<label class="sso-field"><span>管理员密码</span><input id="sub2apiPassword" type="password" placeholder="留空=不修改"></label>'
+        + '<label class="sso-field"><span>目标账号池 ID (grok)</span><input id="sub2apiGroupId" type="number" value="8"></label>'
+        + '<label class="sso-field"><span>代理 Key (可选)</span><input id="sub2apiProxyKey" placeholder="http|127.0.0.1|10808||"></label>'
+        + '<label class="sso-field"><span>grok 模型 (自动填)</span><input id="sub2apiGrokModel" placeholder="grok-4.6"></label>'
+        + '<label class="sso-field"><span>同步间隔 (秒)</span><input id="sub2apiInterval" type="number" value="3600"></label>'
+        + '</div>'
+        + '<div class="sso-config-row"><label class="sso-check"><input type="checkbox" id="sub2apiAutoSync"> 启用定时自动同步 + 清理失效</label>'
+        + '<div class="sso-config-actions"><button class="ghost" id="sub2apiDiscoverBtn">获取配置</button><button class="ghost" id="sub2apiSaveBtn">保存配置</button><button id="sub2apiSyncBtn">立即同步</button></div></div>'
+        + '<div class="sso-discover-hint" id="ssoDiscoverHint"></div>'
+        + '</div>'
+        + '<div id="ssoList" class="sso-list"><div class="sso-empty">' + ts('empty') + '</div></div><div id="ssoToast" class="sso-toast"></div>';
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      box.appendChild(grid);
+      for (const [key, type, extra] of defs) {
+        const [label, help] = i18n[lang].fields[key] || [key, ''];
+        if (type === 'checkbox') {
+          const row = document.createElement('label');
+          row.className = 'check-row';
+          const input = document.createElement('input');
+          input.type = 'checkbox'; input.id = key;
+          const text = document.createElement('span'); text.textContent = label;
+          row.append(input, text); grid.appendChild(row);
+          if (help) { const h = document.createElement('div'); h.className = 'check-help'; h.textContent = help; grid.appendChild(h); }
+          input.addEventListener('change', () => dirty.add(key));
+          continue;
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'field' + (extra === 'full' ? ' full' : '');
+        const lab = document.createElement('label');
+        lab.className = 'field-label'; lab.htmlFor = key; lab.textContent = label;
+        let input;
+        if (type === 'select') {
+          input = document.createElement('select');
+          for (const value of extra) { const o = document.createElement('option'); o.value = value; o.textContent = value; input.appendChild(o); }
+        } else {
+          input = document.createElement('input'); input.type = type;
+          const opt = extra && typeof extra === 'object' ? extra : {};
+          if (opt.min !== undefined) input.min = opt.min;
+          if (opt.max !== undefined) input.max = opt.max;
+        }
+        input.id = key;
+        const helper = document.createElement('div'); helper.className = 'field-help'; helper.textContent = help;
+        wrap.append(lab, input, helper); grid.appendChild(wrap);
+        input.addEventListener('change', () => dirty.add(key));
+        input.addEventListener('input', () => dirty.add(key));
+      }
+    }
+    sections.appendChild(box);
+    first = false;
+  }
+  bindSub2api();
+  loadSub2apiConfig();
+}
+
+function switchTab(target) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.target === 'sec-' + target));
+  document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === 'sec-' + target));
+  if (target === 'sso') loadSso();
+}
+
+function applyLanguage() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  $('langZh').classList.toggle('active', lang === 'zh');
+  $('langEn').classList.toggle('active', lang === 'en');
+  for (const [key, [tabKey]] of Object.entries(tabMeta)) {
+    const tab = document.querySelector('[data-tabkey="' + tabKey + '"] span');
+    if (tab) tab.textContent = t(tabKey);
+  }
+  for (const defs of Object.values(fieldDefs)) {
+    for (const [key, type] of defs) {
+      const el = $(key); if (!el) continue;
+      const [label, help] = i18n[lang].fields[key] || [key, ''];
+      if (type === 'checkbox') {
+        const span = el.parentElement.querySelector('span'); if (span) span.textContent = label;
+        const h = el.parentElement.nextElementSibling; if (h && h.classList.contains('check-help')) h.textContent = help;
+      } else {
+        const wrap = el.parentElement;
+        const lab = wrap.querySelector('.field-label'), h = wrap.querySelector('.field-help');
+        if (lab) lab.textContent = label; if (h) h.textContent = help;
+      }
+    }
+  }
+  updateStatusText(lastStatus);
+}
+function setLanguage(next) { lang = next; localStorage.setItem('grok_register_lang', lang); renderFields(); applyLanguage(); loadConfig().catch(() => {}); loadSso(); }
+function setNotice(text, bad = false) { const n = $('notice'); n.textContent = text || ''; n.className = 'notice' + (bad ? ' error' : ''); }
+function setFormDisabled(disabled) { document.querySelectorAll('#sections input, #sections select').forEach(el => el.disabled = disabled); $('saveBtn').disabled = disabled; $('startBtn').disabled = disabled; $('stopBtn').hidden = !disabled; }
+function applyConfig(cfg) { for (const defs of Object.values(fieldDefs)) { for (const [key, type] of defs) { const el = $(key); if (!el || !(key in cfg)) continue; if (type === 'checkbox') el.checked = !!cfg[key]; else el.value = cfg[key] ?? ''; } } dirty.clear(); }
+function readValue(key) { const el = $(key); if (!el) return undefined; if (el.type === 'checkbox') return el.checked; if (el.type === 'number') return Number.parseInt(el.value, 10); return el.value; }
+async function loadConfig() { const r = await fetch('/api/config'); if (!r.ok) throw new Error((await r.json()).detail || t('loadFailed')); const d = await r.json(); applyConfig(d.config || {}); }
+async function saveConfig() { if (running) return false; const payload = {}; for (const key of dirty) payload[key] = readValue(key); if (!Object.keys(payload).length) { setNotice(t('noChanges')); return true; } const r = await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const d = await r.json(); if (!r.ok) { setNotice(d.detail || t('saveFailed'), true); return false; } applyConfig(d.config || {}); setNotice(t('saved')); $('saveState').textContent = t('saved'); setTimeout(() => { $('saveState').textContent = ''; }, 1800); return true; }
+async function startJob() { if (dirty.size && !await saveConfig()) return; setNotice(''); const r = await fetch('/api/start', { method: 'POST' }); const d = await r.json(); if (!r.ok) { setNotice(d.detail || t('startFailed'), true); return; } await pollStatus(); }
+async function stopJob() { const r = await fetch('/api/stop', { method: 'POST' }); const d = await r.json(); if (!r.ok) setNotice(d.detail || t('stopFailed'), true); else setNotice(d.stopped ? t('stopSent') : t('noJob')); }
+function appendLine(entry) { const body = $('terminal'), empty = $('emptyLog'); if (empty) empty.remove(); const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80; const div = document.createElement('div'); div.className = 'line'; const line = String(entry.line || ''); if (line.includes('[+]')) div.classList.add('ok'); else if (line.includes('[!]')) div.classList.add('bad'); else if (line.includes('[*]')) div.classList.add('info'); else if (line.toLowerCase().includes('warn')) div.classList.add('warn'); div.textContent = line; body.appendChild(div); while (body.children.length > 2000) body.removeChild(body.firstChild); if (nearBottom) body.scrollTop = body.scrollHeight; }
+async function pollLogs() { try { const r = await fetch('/api/logs?after=' + lastSeq); if (!r.ok) return; const d = await r.json(); serverLatest = d.latest || lastSeq; for (const e of d.entries || []) { appendLine(e); lastSeq = Math.max(lastSeq, Number(e.seq) || 0); } } catch (_) {} }
+function updateStatusText(s = {}) { lastStatus = s; const dot = $('statusDot'); dot.className = 'status-dot' + (running ? ' running' : (s.cancelled ? ' cancelled' : '')); $('sStatus').textContent = running ? t('running') : (s.cancelled ? t('stopped') : t('idle')); $('startBtn').hidden = running; $('stopBtn').hidden = !running; }
+async function pollStatus() { try { const r = await fetch('/api/status'); if (!r.ok) return; const s = await r.json(); running = !!s.running; $('sTarget').textContent = s.target || 0; $('sSuccess').textContent = s.success || 0; $('sFail').textContent = s.fail || 0; $('sPending').textContent = s.pending || 0; $('sWarnings').textContent = s.warnings || 0; updateStatusText(s); setFormDisabled(running); if (s.error) setNotice(s.error, true); } catch (_) {} }
+async function copyLogs() { const text = [...$('terminal').querySelectorAll('.line')].map(x => x.textContent).join('\n'); try { await navigator.clipboard.writeText(text); setNotice(t('copied')); } catch (_) { setNotice(t('copyFailed'), true); } }
+function clearLogs() { const body = $('terminal'); body.innerHTML = '<div id="emptyLog" class="empty-log">' + t('logReady') + '</div>'; lastSeq = serverLatest; }
+
+function ssoToast(msg) {
+  const t = $('ssoToast'); if (!t) return; t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800);
+}
+function ssoStatusBadge(expired) {
+  if (!expired) return '<span class="sso-badge">' + (lang === 'zh' ? '无过期信息' : 'No expiry') + '</span>';
+  const d = new Date(expired); if (isNaN(d)) return '<span class="sso-badge">' + (lang === 'zh' ? '过期字段异常' : 'Bad expiry') + '</span>';
+  const now = new Date(); const diffMin = (d - now) / 60000;
+  if (diffMin <= 0) return '<span class="sso-badge expired">' + (lang === 'zh' ? '已过期' : 'Expired') + '</span>';
+  if (diffMin < 60) return '<span class="sso-badge warn">' + (lang === 'zh' ? '约 ' + Math.round(diffMin) + ' 分钟后过期' : 'Expires in ' + Math.round(diffMin) + ' min') + '</span>';
+  return '<span class="sso-badge ok">' + (lang === 'zh' ? '有效' : 'Valid') + '</span>';
+}
+function ssoEscape(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function ssoCopyToken(tk) { if (!tk) { ssoToast(lang === 'zh' ? 'token 为空' : 'Token empty'); return; } navigator.clipboard.writeText(tk).then(() => ssoToast(ts('copied')), () => ssoToast(ts('copyFailed'))); }
+async function ssoDownloadSub2api(email) {
+  let url = '/api/sso/export-sub2api'; if (email) url += '?email=' + encodeURIComponent(email);
+  try { const res = await fetch(url); if (!res.ok) { const e = await res.json().catch(() => ({})); ssoToast(ts('exportFailed') + ': ' + (e.detail || res.status)); return; }
+    const data = await res.json(); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = email ? ('sub2api-grok-' + email + '.json') : 'sub2api-grok-all.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href); ssoToast(ts('exportOk'));
+  } catch (e) { ssoToast(ts('exportFailed') + ': ' + e.message); }
+}
+function ssoRender(accounts) {
+  const list = $('ssoList'); if (!list) return;
+  if (!accounts.length) { list.innerHTML = '<div class="sso-empty">' + ts('empty') + '</div>'; return; }
+  list.innerHTML = accounts.map(a => '<div class="sso-card"><div class="sso-card-head"><span class="sso-email">' + ssoEscape(a.email || '(no email)') + '</span>' + ssoStatusBadge(a.expired) + '</div><div class="sso-meta">file: ' + ssoEscape(a.file) + '<br>base_url: ' + ssoEscape(a.base_url || '-') + '</div><div class="sso-token">' + ssoEscape(a.access_token || '(no token)') + '</div><div class="sso-card-actions"><button onclick="ssoCopyToken(this.dataset.tk)" data-tk="' + ssoEscape(a.access_token || '') + '">' + ts('copy') + '</button><button class="ghost" onclick="ssoDownloadSub2api(this.dataset.em)" data-em="' + ssoEscape(a.email || '') + '">' + ts('export') + '</button></div></div>').join('');
+}
+async function loadSso() {
+  const list = $('ssoList'); if (!list) return;
+  try { const res = await fetch('/api/sso/accounts'); const data = await res.json(); if (!data.ok) throw new Error(data.detail || ts('loadFailed')); ssoRender(data.accounts); }
+  catch (e) { list.innerHTML = '<div class="sso-empty">' + ts('loadFailed') + ': ' + e.message + '</div>'; }
+}
+function bindSso() {
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('#ssoRefreshBtn'); if (btn) { e.preventDefault(); loadSso(); }
+    const btn2 = e.target.closest('#ssoExportAllBtn'); if (btn2) { e.preventDefault(); ssoDownloadSub2api(null); }
+  });
+}
+
+function loadSub2apiConfig() {
+  fetch('/api/sso/sub2api-config').then(r => r.json()).then(d => {
+    if (!d.ok) return;
+    const c = d.config || {};
+    $('sub2apiBaseUrl').value = c.sub2api_base_url || '';
+    $('sub2apiEmail').value = c.sub2api_email || '';
+    $('sub2apiGroupId').value = c.sub2api_group_id || 8;
+    $('sub2apiProxyKey').value = c.sub2api_proxy_key || 'http|127.0.0.1|10808||';
+    $('sub2apiGrokModel').value = c.sub2api_grok_model || 'grok-4.6';
+    $('sub2apiInterval').value = c.sub2api_sync_interval_sec || 3600;
+    $('sub2apiAutoSync').checked = !!c.sub2api_auto_sync;
+  }).catch(() => {});
+}
+
+function saveSub2apiConfig() {
+  const payload = {
+    sub2api_base_url: $('sub2apiBaseUrl').value.trim(),
+    sub2api_email: $('sub2apiEmail').value.trim(),
+    sub2api_password: $('sub2apiPassword').value,
+    sub2api_group_id: Number($('sub2apiGroupId').value) || 8,
+    sub2api_proxy_key: $('sub2apiProxyKey').value.trim(),
+    sub2api_grok_model: $('sub2apiGrokModel').value.trim() || 'grok-4.6',
+    sub2api_sync_interval_sec: Number($('sub2apiInterval').value) || 3600,
+    sub2api_auto_sync: $('sub2apiAutoSync').checked,
+  };
+  fetch('/api/sso/sub2api-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(r => r.json()).then(d => {
+      if (d.ok) { ssoToast(lang === 'zh' ? '配置已保存' : 'Config saved'); $('sub2apiPassword').value = ''; }
+      else ssoToast((lang === 'zh' ? '保存失败: ' : 'Save failed: ') + (d.detail || ''));
+    }).catch(e => ssoToast((lang === 'zh' ? '保存失败: ' : 'Save failed: ') + e.message));
+}
+
+function syncSub2api() {
+  const st = $('ssoSyncState');
+  st.textContent = lang === 'zh' ? '同步中…' : 'Syncing…';
+  st.className = 'sso-config-state';
+  fetch('/api/sso/sync-sub2api', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      st.textContent = (lang === 'zh'
+        ? '已添加 ' + d.added + ' · 已关联 ' + d.linked + ' · 已清理 ' + d.deleted
+        : 'added ' + d.added + ' · linked ' + d.linked + ' · cleaned ' + d.deleted);
+      ssoToast(lang === 'zh' ? '同步完成' : 'Sync done');
+    } else {
+      st.textContent = (lang === 'zh' ? '失败: ' : 'failed: ') + (d.reason || '');
+      st.className = 'sso-config-state bad';
+      ssoToast(lang === 'zh' ? '同步失败' : 'Sync failed');
+    }
+    loadSso();
+  }).catch(e => { st.textContent = (lang === 'zh' ? '错误: ' : 'error: ') + e.message; st.className = 'sso-config-state bad'; });
+}
+
+function discoverSub2api() {
+  const base = $('sub2apiBaseUrl').value.trim();
+  const email = $('sub2apiEmail').value.trim();
+  const pw = $('sub2apiPassword').value;
+  if (!base || !email || !pw) {
+    ssoToast(lang === 'zh' ? '请先填写 sub2api 地址、邮箱、密码' : 'Please fill base URL, email and password');
+    return;
+  }
+  const st = $('ssoSyncState');
+  const hint = $('ssoDiscoverHint');
+  st.textContent = lang === 'zh' ? '获取中…' : 'Discovering…';
+  st.className = 'sso-config-state';
+  hint.textContent = '';
+  fetch('/api/sso/discover-sub2api', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base_url: base, email: email, password: pw }),
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      const s = d.suggested || {};
+      if (s.group_id != null) $('sub2apiGroupId').value = s.group_id;
+      if (s.proxy_key) $('sub2apiProxyKey').value = s.proxy_key;
+      if (s.model) $('sub2apiGrokModel').value = s.model;
+      const groups = (d.groups || []).map(g => '#' + g.id + ' ' + g.name + ' (' + g.platform + ')').join(' / ');
+      const proxies = (d.proxies || []).map(p => '#' + p.id + ' ' + p.name + ' [' + p.status + ']').join(' / ');
+      const models = (d.models || []).join(', ') || (lang === 'zh' ? '无' : 'none');
+      hint.textContent = (lang === 'zh' ? '已自动回填。可用配置：' : 'Auto-filled. Available:')
+        + '\n' + (lang === 'zh' ? '账号池' : 'Groups') + ': ' + groups
+        + '\n' + (lang === 'zh' ? '代理' : 'Proxies') + ': ' + proxies
+        + '\n' + (lang === 'zh' ? '模型' : 'Models') + ': ' + models;
+      st.textContent = lang === 'zh' ? '获取成功' : 'Discovered';
+      ssoToast(lang === 'zh' ? '配置已获取' : 'Config discovered');
+    } else {
+      st.textContent = (lang === 'zh' ? '失败: ' : 'failed: ') + (d.reason || '');
+      st.className = 'sso-config-state bad';
+      ssoToast(lang === 'zh' ? '获取失败' : 'Discover failed');
+    }
+  }).catch(e => {
+    st.textContent = (lang === 'zh' ? '错误: ' : 'error: ') + e.message;
+    st.className = 'sso-config-state bad';
+  });
+}
+
+function bindSub2api() {
+  const discover = $('sub2apiDiscoverBtn'); if (discover) discover.onclick = discoverSub2api;
+  const save = $('sub2apiSaveBtn'); if (save) save.onclick = saveSub2apiConfig;
+  const sync = $('sub2apiSyncBtn'); if (sync) sync.onclick = syncSub2api;
+}
+
+function bind() {
+  renderFields(); applyLanguage();
+  $('langZh').onclick = () => setLanguage('zh'); $('langEn').onclick = () => setLanguage('en');
+  $('saveBtn').onclick = () => saveConfig().catch(e => setNotice(e.message, true));
+  $('startBtn').onclick = () => startJob().catch(e => setNotice(e.message, true));
+  $('stopBtn').onclick = () => stopJob().catch(e => setNotice(e.message, true));
+  $('copyBtn').onclick = () => copyLogs(); $('clearBtn').onclick = () => clearLogs();
+  loadConfig().catch(e => setNotice(e.message, true));
+  bindSso(); loadSso();
+  pollStatus(); pollLogs();
+  setInterval(pollStatus, 1000); setInterval(pollLogs, 1000);
+}
 bind();
 </script>
 </body>

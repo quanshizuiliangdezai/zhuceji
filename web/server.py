@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import collections
 import datetime
+import glob
+import json
+import os
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +23,8 @@ ROOT = Path(__file__).resolve().parent.parent
 INDEX_HTML = Path(__file__).resolve().parent / "index.html"
 PROXY_POOL_JS = Path(__file__).resolve().parent / "proxy-pool.js"
 PROXY_POOL_CSS = Path(__file__).resolve().parent / "proxy-pool.css"
+CPA_DIR = ROOT / "cpa_auths"
+GROK_SUBSCRIPTION_PROXY = "https://cli-chat-proxy.grok.com/v1"
 LOG_LIMIT = 2000
 
 app = FastAPI(title="grok-register WebUI", version="1.1")
@@ -217,6 +224,120 @@ def logs(after: int = Query(default=0, ge=0)):
     return {"ok": True, "latest": latest, "entries": entries}
 
 
+def _parse_expiry(value) -> Optional[datetime.datetime]:
+    if not value:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.datetime.fromtimestamp(int(value))
+        except Exception:
+            return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        return datetime.datetime.fromisoformat(text)
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        try:
+            return datetime.datetime.strptime(text, fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _is_expired(data: dict) -> bool:
+    expiry = _parse_expiry(data.get("expired"))
+    if expiry is None:
+        expiry = _parse_expiry(data.get("expires_at"))
+    if expiry is None:
+        return False
+    now = datetime.datetime.now(datetime.timezone.utc if expiry.tzinfo else None)
+    return expiry <= now
+
+
+def _read_sso_accounts():
+    accounts = []
+    if CPA_DIR.is_dir():
+        for p in sorted(glob.glob(str(CPA_DIR / "xai-*.json"))):
+            try:
+                data = json.loads(Path(p).read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            expired_iso = data.get("expired", "")
+            if not expired_iso:
+                expires_at = data.get("expires_at")
+                if expires_at:
+                    try:
+                        expired_iso = datetime.datetime.fromtimestamp(int(expires_at)).isoformat()
+                    except Exception:
+                        pass
+            account = {
+                "file": os.path.basename(p),
+                "email": data.get("email", ""),
+                "base_url": data.get("base_url", ""),
+                "access_token": data.get("access_token", ""),
+                "refresh_token": data.get("refresh_token", ""),
+                "token_type": data.get("token_type", ""),
+                "expired": expired_iso,
+                "type": data.get("type", ""),
+            }
+            if not _is_expired(account):
+                accounts.append(account)
+    return accounts
+
+
+@app.get("/api/sso/accounts")
+def sso_accounts():
+    accounts = _read_sso_accounts()
+    return {"ok": True, "count": len(accounts), "accounts": accounts}
+
+
+@app.get("/api/sso/export-sub2api")
+def sso_export_sub2api(email: Optional[str] = None):
+    accounts = []
+    for data in _read_sso_accounts():
+        if email and data.get("email") != email:
+            continue
+        token = data.get("access_token", "")
+        if not token:
+            continue
+        base_url = data.get("base_url") or GROK_SUBSCRIPTION_PROXY
+        name = data.get("email") or data.get("file")
+        credentials = {
+            "access_token": token,
+            "base_url": base_url,
+            "model_mapping": {},
+        }
+        if data.get("refresh_token"):
+            credentials["refresh_token"] = data["refresh_token"]
+        if data.get("token_type"):
+            credentials["token_type"] = data["token_type"]
+        if data.get("expired"):
+            credentials["expires_at"] = data["expired"]
+        accounts.append({
+            "name": name,
+            "notes": "grok-register SSO token",
+            "platform": "grok",
+            "type": "oauth",
+            "credentials": credentials,
+            "extra": {},
+            "concurrency": 1,
+            "priority": 0,
+            "rate_multiplier": 1,
+            "auto_pause_on_expired": True,
+        })
+    if not accounts:
+        raise HTTPException(
+            status_code=404,
+            detail="没有可用的 SSO 账号（cpa_auths/ 为空或无 access_token）",
+        )
+    return {
+        "exported_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "proxies": [],
+        "accounts": accounts,
+    }
+
+
 @app.post("/api/start")
 def start():
     global _job_thread, _controller
@@ -287,6 +408,293 @@ def main() -> None:
     import uvicorn
 
     uvicorn.run("web.server:app", host="127.0.0.1", port=8092, workers=1)
+
+
+# ---------------------------------------------------------------------------
+# sub2api 自动同步（账号池）
+# ---------------------------------------------------------------------------
+_SUB2API_KEYS = (
+    "sub2api_base_url", "sub2api_email", "sub2api_password",
+    "sub2api_group_id", "sub2api_auto_sync", "sub2api_sync_interval_sec",
+    "sub2api_proxy_key", "sub2api_grok_model",
+)
+_SUB2API_DEFAULT_PROXY_KEY = "http|127.0.0.1|10808||"
+
+
+def _sub2api_cfg() -> dict:
+    c = engine.config
+    return {
+        "base_url": (c.get("sub2api_base_url") or "").strip().rstrip("/"),
+        "email": (c.get("sub2api_email") or "").strip(),
+        "password": c.get("sub2api_password") or "",
+        "group_id": int(c.get("sub2api_group_id") or 8),
+        "auto_sync": bool(c.get("sub2api_auto_sync", False)),
+        "interval": int(c.get("sub2api_sync_interval_sec") or 3600),
+        "proxy_key": (c.get("sub2api_proxy_key") or _SUB2API_DEFAULT_PROXY_KEY).strip(),
+        "model": (c.get("sub2api_grok_model") or "grok-4.6").strip(),
+    }
+
+
+def _http_json(method: str, url: str, token: Optional[str] = None, body: Any = None, timeout: int = 25):
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read().decode("utf-8", "ignore")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode("utf-8", "ignore")
+    except Exception as exc:  # noqa: BLE001
+        return 0, str(exc)
+
+
+def _sub2api_login(cfg: dict) -> str:
+    s, b = _http_json("POST", cfg["base_url"] + "/api/v1/auth/login",
+                      body={"email": cfg["email"], "password": cfg["password"]})
+    if s != 200:
+        raise RuntimeError("sub2api 登录失败 HTTP %s: %s" % (s, b[:160]))
+    return json.loads(b)["data"]["access_token"]
+
+
+def _sub2api_list_grok(token: str, base: str) -> list:
+    s, b = _http_json("GET", base + "/api/v1/admin/accounts?platform=grok", token=token)
+    if s != 200:
+        raise RuntimeError("列出 grok 账号失败 HTTP %s: %s" % (s, b[:160]))
+    return json.loads(b).get("data", {}).get("items", [])
+
+
+def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model: str = "grok-4.6"):
+    creds = {"access_token": acc["access_token"], "base_url": acc["base_url"] or GROK_SUBSCRIPTION_PROXY}
+    if acc.get("refresh_token"):
+        creds["refresh_token"] = acc["refresh_token"]
+    if acc.get("token_type"):
+        creds["token_type"] = acc["token_type"]
+    if acc.get("expired"):
+        creds["expires_at"] = acc["expired"]
+    creds["model_mapping"] = {model: model}
+    payload = {"accounts": [{
+        "name": acc["email"] or acc["file"],
+        "notes": "grok-register SSO token",
+        "platform": "grok", "type": "oauth",
+        "credentials": creds,
+        "proxy_key": proxy_key,
+        "concurrency": 1, "priority": 1, "rate_multiplier": 1,
+        "auto_pause_on_expired": True,
+    }]}
+    s, b = _http_json("POST", base + "/api/v1/admin/accounts/batch", token=token, body=payload)
+    if s != 200:
+        raise RuntimeError("导入账号失败 HTTP %s: %s" % (s, b[:160]))
+    for r in json.loads(b).get("data", {}).get("results", []):
+        if r.get("success"):
+            return r.get("id")
+    return None
+
+
+def _sub2api_link_group(acc_id, group_id, base: str, token: str):
+    _http_json("PUT", base + "/api/v1/admin/accounts/%d" % int(acc_id),
+               token=token, body={"group_ids": [int(group_id)]})
+
+
+def _sub2api_set_model(acc_id, model: str, base: str, token: str):
+    # PUT 为合并语义，仅补 model_mapping，不破坏已有 credentials
+    _http_json("PUT", base + "/api/v1/admin/accounts/%d" % int(acc_id),
+               token=token, body={"credentials": {"model_mapping": {model: model}}})
+
+
+def _sub2api_delete(acc_id, base: str, token: str):
+    _http_json("DELETE", base + "/api/v1/admin/accounts/%d" % int(acc_id), token=token)
+
+
+def _sso_sync_once() -> dict:
+    cfg = _sub2api_cfg()
+    if not cfg["base_url"] or not cfg["email"] or not cfg["password"]:
+        return {"ok": False, "reason": "sub2api 未配置（缺少地址/邮箱/密码）"}
+    try:
+        token = _sub2api_login(cfg)
+        local = _read_sso_accounts()  # 已过滤过期
+        remote = _sub2api_list_grok(token, cfg["base_url"])
+        remote_by_name = {}
+        for a in remote:
+            remote_by_name.setdefault(a.get("name"), []).append(a)
+        added = linked = modeled = 0
+        for acc in local:
+            name = acc["email"] or acc["file"]
+            matched = remote_by_name.get(name)
+            if matched:
+                for a in matched:
+                    _sub2api_link_group(a["id"], cfg["group_id"], cfg["base_url"], token)
+                    linked += 1
+                    # 已存在但缺模型的，自动补上（合并 PUT，不动 token）
+                    if not (a.get("credentials") or {}).get("model_mapping"):
+                        _sub2api_set_model(a["id"], cfg["model"], cfg["base_url"], token)
+                        modeled += 1
+            else:
+                new_id = _sub2api_import_one(acc, cfg["base_url"], token, cfg["proxy_key"], cfg["model"])
+                if new_id:
+                    _sub2api_link_group(new_id, cfg["group_id"], cfg["base_url"], token)
+                    added += 1
+        deleted = 0
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for a in remote:
+            exp = _parse_expiry(a.get("expires_at"))
+            if exp and exp <= now:
+                _sub2api_delete(a["id"], cfg["base_url"], token)
+                deleted += 1
+        return {"ok": True, "added": added, "linked": linked, "modeled": modeled, "deleted": deleted,
+                "local": len(local), "remote_total": len(remote)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": str(exc)}
+
+
+def _proxy_key_from_proxy(p: dict) -> str:
+    return "%s|%s|%s|%s|%s" % (
+        p.get("protocol") or "http",
+        p.get("host") or "",
+        p.get("port") or "",
+        p.get("username") or "",
+        p.get("password") or "",
+    )
+
+
+def _sub2api_discover(base_url: str, email: str, password: str) -> dict:
+    base = base_url.rstrip("/")
+    token = _sub2api_login({"base_url": base, "email": email, "password": password})
+
+    def get_items(ep: str) -> list:
+        s, b = _http_json("GET", base + ep, token=token)
+        if s != 200:
+            raise RuntimeError("读取 %s 失败 HTTP %s: %s" % (ep, s, b[:160]))
+        return json.loads(b).get("data", {}).get("items", [])
+
+    groups = get_items("/api/v1/admin/groups")
+    proxies = get_items("/api/v1/admin/proxies")
+    channels = get_items("/api/v1/admin/channels")
+
+    grok_groups = [g for g in groups if (g.get("platform") or "").lower() == "grok"]
+    suggested_group = grok_groups[0] if grok_groups else (groups[0] if groups else None)
+    group_id = suggested_group["id"] if suggested_group else None
+
+    active_proxies = [p for p in proxies if (p.get("status") or "").lower() == "active"]
+    if not active_proxies:
+        active_proxies = proxies
+    pref = [p for p in active_proxies if p.get("host") == "127.0.0.1" and str(p.get("port")) == "10808"]
+    suggested_proxy = pref[0] if pref else (active_proxies[0] if active_proxies else None)
+    proxy_key = _proxy_key_from_proxy(suggested_proxy) if suggested_proxy else _SUB2API_DEFAULT_PROXY_KEY
+
+    models = []
+    if group_id:
+        for ch in channels:
+            if group_id in (ch.get("group_ids") or []):
+                for plat_map in (ch.get("model_mapping") or {}).values():
+                    if isinstance(plat_map, dict):
+                        models.extend(plat_map.keys())
+    if not models:
+        for ch in channels:
+            mapping = ch.get("model_mapping") or {}
+            for plat, plat_map in mapping.items():
+                if isinstance(plat_map, dict) and "grok" in str(plat).lower():
+                    models.extend(plat_map.keys())
+    model = "grok-4.6" if "grok-4.6" in models else (models[0] if models else "grok-4.6")
+
+    return {
+        "ok": True,
+        "groups": [{"id": g.get("id"), "name": g.get("name"), "platform": g.get("platform")} for g in groups],
+        "proxies": [{"id": p.get("id"), "name": p.get("name"), "protocol": p.get("protocol"),
+                     "host": p.get("host"), "port": p.get("port"), "status": p.get("status")} for p in proxies],
+        "models": models,
+        "suggested": {
+            "group_id": group_id,
+            "proxy_key": proxy_key,
+            "model": model,
+        },
+    }
+
+
+@app.post("/api/sso/discover-sub2api")
+async def discover_sub2api(request: Request):
+    body = await request.json()
+    base = (body.get("base_url") or "").strip()
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    if not base or not email or not password:
+        return {"ok": False, "reason": "地址、邮箱、密码都不能为空"}
+    try:
+        return _sub2api_discover(base, email, password)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": str(exc)}
+
+
+@app.get("/api/sso/sub2api-config")
+def get_sub2api_config():
+    c = engine.config
+    return {"ok": True, "config": {
+        "sub2api_base_url": c.get("sub2api_base_url", ""),
+        "sub2api_email": c.get("sub2api_email", ""),
+        "sub2api_group_id": int(c.get("sub2api_group_id") or 8),
+        "sub2api_proxy_key": c.get("sub2api_proxy_key", _SUB2API_DEFAULT_PROXY_KEY),
+        "sub2api_grok_model": c.get("sub2api_grok_model", "grok-4.6"),
+        "sub2api_auto_sync": bool(c.get("sub2api_auto_sync", False)),
+        "sub2api_sync_interval_sec": int(c.get("sub2api_sync_interval_sec") or 3600),
+        "password_set": bool(c.get("sub2api_password")),
+    }}
+
+
+@app.put("/api/sso/sub2api-config")
+async def put_sub2api_config(request: Request):
+    updates = await request.json()
+    bad = set(updates) - set(_SUB2API_KEYS)
+    if bad:
+        raise HTTPException(status_code=400, detail="未知配置项: " + ", ".join(bad))
+    for k, v in updates.items():
+        if k == "sub2api_password":
+            if not v or v == "********":
+                continue  # 不修改
+            engine.config[k] = str(v)
+        elif k in ("sub2api_group_id", "sub2api_sync_interval_sec"):
+            engine.config[k] = int(v)
+        elif k == "sub2api_auto_sync":
+            engine.config[k] = bool(v)
+        else:
+            engine.config[k] = str(v)
+    engine.save_config()
+    return {"ok": True, "config": {k: engine.config.get(k) for k in _SUB2API_KEYS}}
+
+
+@app.post("/api/sso/sync-sub2api")
+def sync_sub2api():
+    return _sso_sync_once()
+
+
+# ---- 后台定时同步 ----
+_sync_thread: Optional[threading.Thread] = None
+
+
+def _sub2api_sync_loop():
+    while True:
+        cfg = _sub2api_cfg()
+        time.sleep(max(300, cfg["interval"]))
+        if _sub2api_cfg()["auto_sync"]:
+            try:
+                res = _sso_sync_once()
+                _append_log("[*] sub2api 定时同步完成: %s" % json.dumps(res, ensure_ascii=False))
+            except Exception as exc:  # noqa: BLE001
+                _append_log("[!] sub2api 定时同步异常: %s" % exc)
+
+
+@app.on_event("startup")
+def _startup_sub2api_sync():
+    global _sync_thread
+    try:
+        engine.load_config()
+    except Exception:
+        pass
+    if _sync_thread and _sync_thread.is_alive():
+        return
+    _sync_thread = threading.Thread(target=_sub2api_sync_loop, name="sub2api-sync", daemon=True)
+    _sync_thread.start()
+    _append_log("[*] sub2api 定时同步线程已启动")
 
 
 if __name__ == "__main__":
