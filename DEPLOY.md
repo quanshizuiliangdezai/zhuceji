@@ -4,7 +4,7 @@
 
 ## 方式一（推荐）：一条命令从零部署
 
-复制粘贴下面任意一条命令到终端运行即可：
+复制粘贴下面任意一条命令到终端运行即可（默认部署 `feat/sub2api-discover` 功能分支）：
 
 ### Windows (PowerShell)
 
@@ -19,6 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/quanshizuiliangdezai/zhuceji/main/i
 ```
 
 运行后访问：**http://127.0.0.1:8092**
+
+> 想换分支？加环境变量 `BRANCH=main` 或 `$env:BRANCH="main"`。
 
 ## 方式二：仓库已克隆，用内置脚本部署
 

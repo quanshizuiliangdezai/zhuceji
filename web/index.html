@@ -38,8 +38,9 @@
 .sso-config-state.bad{color:var(--red)}
 .sso-config-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .sso-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
-.sso-field input{height:34px;border-radius:8px;border:1px solid var(--line);background:var(--panel3);color:var(--fg);padding:0 10px;font-size:13px}
-.sso-field input:focus{outline:none;border-color:var(--accent)}
+.sso-field input,.sso-field select{height:34px;border-radius:8px;border:1px solid var(--line);background:var(--panel3);color:var(--fg);padding:0 10px;font-size:13px}
+.sso-field input:focus,.sso-field select:focus{outline:none;border-color:var(--accent)}
+.sso-field select option{background:var(--panel3);color:var(--fg)}
 .sso-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;flex-wrap:wrap}
 .sso-check{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--soft);cursor:pointer}
 .sso-config-actions{display:flex;gap:8px}
@@ -159,9 +160,9 @@ function renderFields() {
         + '<label class="sso-field"><span>sub2api 地址</span><input id="sub2apiBaseUrl" placeholder="http://59.49.48.147:15005"></label>'
         + '<label class="sso-field"><span>管理员邮箱</span><input id="sub2apiEmail" placeholder="zzy1337005740@gmail.com"></label>'
         + '<label class="sso-field"><span>管理员密码</span><input id="sub2apiPassword" type="password" placeholder="留空=不修改"></label>'
-        + '<label class="sso-field"><span>目标账号池 ID (grok)</span><input id="sub2apiGroupId" type="number" value="8"></label>'
-        + '<label class="sso-field"><span>代理 Key (可选)</span><input id="sub2apiProxyKey" placeholder="http|127.0.0.1|10808||"></label>'
-        + '<label class="sso-field"><span>grok 模型 (自动填)</span><input id="sub2apiGrokModel" placeholder="grok-4.6"></label>'
+        + '<label class="sso-field"><span>目标账号池 ID (grok)</span><select id="sub2apiGroupId"><option value="8">#8 cs2 (grok)</option></select></label>'
+        + '<label class="sso-field"><span>代理 Key (可选)</span><select id="sub2apiProxyKey"><option value="http|127.0.0.1|10808||">#2 local-10808 [active]</option></select></label>'
+        + '<label class="sso-field"><span>grok 模型 (自动填)</span><select id="sub2apiGrokModel"><option value="grok-4.6">grok-4.6</option></select></label>'
         + '<label class="sso-field"><span>同步间隔 (秒)</span><input id="sub2apiInterval" type="number" value="3600"></label>'
         + '<label class="sso-field"><span>目标可用数量 (0=关闭智能补充)</span><input id="sub2apiTargetAvailable" type="number" value="0" min="0" max="1000"></label>'
         + '<label class="sso-field"><span>单次最大补充</span><input id="sub2apiMaxBatch" type="number" value="5" min="1" max="50"></label>'
@@ -302,22 +303,105 @@ function bindSso() {
   });
 }
 
+let _sub2apiOptions = { groups: [], proxies: [], models: [] };
+
+function _buildSelectOptions(items, type) {
+  if (type === 'group') {
+    return (items || []).map(g => ({ value: g.id, text: '#' + g.id + ' ' + (g.name || '') + ' (' + (g.platform || '') + ')' }));
+  }
+  if (type === 'proxy') {
+    return (items || []).map(p => ({
+      value: (p.protocol || 'http') + '|' + (p.host || '') + '|' + (p.port || '') + '|' + (p.username || '') + '|' + (p.password || ''),
+      text: '#' + (p.id || '?') + ' ' + (p.name || '') + ' [' + (p.status || '') + ']'
+    }));
+  }
+  if (type === 'model') {
+    return (items || []).map(m => ({ value: m, text: m }));
+  }
+  return [];
+}
+
+function _setSelect(id, options, selectedValue, placeholder) {
+  const sel = $(id); if (!sel) return;
+  sel.innerHTML = '';
+  if (placeholder) {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = placeholder; opt.disabled = true;
+    sel.appendChild(opt);
+  }
+  let hasSelected = false;
+  options.forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.value; opt.textContent = o.text;
+    if (String(o.value) === String(selectedValue)) { opt.selected = true; hasSelected = true; }
+    sel.appendChild(opt);
+  });
+  if (!hasSelected && selectedValue != null && selectedValue !== '') {
+    const opt = document.createElement('option');
+    opt.value = selectedValue; opt.textContent = selectedValue + (lang === 'zh' ? ' (已保存)' : ' (saved)'); opt.selected = true;
+    sel.insertBefore(opt, sel.firstChild);
+  }
+}
+
+function populateSub2apiSelects(groups, proxies, models, selected) {
+  _sub2apiOptions = { groups: groups || [], proxies: proxies || [], models: models || [] };
+  const s = selected || {};
+  _setSelect('sub2apiGroupId', _buildSelectOptions(groups, 'group'), s.group_id, lang === 'zh' ? '请选择账号池' : 'Select group');
+  _setSelect('sub2apiProxyKey', _buildSelectOptions(proxies, 'proxy'), s.proxy_key, lang === 'zh' ? '请选择代理' : 'Select proxy');
+  _setSelect('sub2apiGrokModel', _buildSelectOptions(models, 'model'), s.model, lang === 'zh' ? '请选择模型' : 'Select model');
+}
+
 function loadSub2apiConfig() {
   fetch('/api/sso/sub2api-config').then(r => r.json()).then(d => {
     if (!d.ok) return;
     const c = d.config || {};
     $('sub2apiBaseUrl').value = c.sub2api_base_url || '';
     $('sub2apiEmail').value = c.sub2api_email || '';
-    $('sub2apiGroupId').value = c.sub2api_group_id || 8;
-    $('sub2apiProxyKey').value = c.sub2api_proxy_key || 'http|127.0.0.1|10808||';
-    $('sub2apiGrokModel').value = c.sub2api_grok_model || 'grok-4.6';
     $('sub2apiInterval').value = c.sub2api_sync_interval_sec || 3600;
     $('sub2apiTargetAvailable').value = c.sub2api_target_available == null ? 0 : c.sub2api_target_available;
     $('sub2apiMaxBatch').value = c.sub2api_max_register_batch || 5;
     $('sub2apiPoolInterval').value = c.sub2api_pool_check_interval_sec || 300;
     $('sub2apiAutoSync').checked = !!c.sub2api_auto_sync;
+    // 如果已配置地址和邮箱，自动拉取一次可选列表，把 group/proxy/model 变成下拉框
+    if (c.sub2api_base_url && c.sub2api_email) {
+      autoDiscoverSub2api(c.sub2api_group_id, c.sub2api_proxy_key, c.sub2api_grok_model);
+    } else {
+      // 没有可选项时，至少把已保存值填进去
+      _setSelect('sub2apiGroupId', [], c.sub2api_group_id || 8);
+      _setSelect('sub2apiProxyKey', [], c.sub2api_proxy_key || 'http|127.0.0.1|10808||');
+      _setSelect('sub2apiGrokModel', [], c.sub2api_grok_model || 'grok-4.6');
+    }
     loadPoolStatus();
   }).catch(() => {});
+}
+
+async function autoDiscoverSub2api(savedGroup, savedProxy, savedModel) {
+  const base = $('sub2apiBaseUrl').value.trim();
+  const email = $('sub2apiEmail').value.trim();
+  if (!base || !email) return;
+  try {
+    const res = await fetch('/api/sso/discover-sub2api', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base_url: base, email: email, password: '' })
+    });
+    const d = await res.json();
+    if (d.ok) {
+      const s = d.suggested || {};
+      populateSub2apiSelects(d.groups, d.proxies, d.models, {
+        group_id: savedGroup != null ? savedGroup : s.group_id,
+        proxy_key: savedProxy || s.proxy_key,
+        model: savedModel || s.model
+      });
+      const groups = (d.groups || []).map(g => '#' + g.id + ' ' + g.name + ' (' + g.platform + ')').join(' / ');
+      const proxies = (d.proxies || []).map(p => '#' + p.id + ' ' + p.name + ' [' + p.status + ']').join(' / ');
+      const models = (d.models || []).join(', ') || (lang === 'zh' ? '无' : 'none');
+      const hint = $('ssoDiscoverHint');
+      if (hint) hint.textContent = (lang === 'zh' ? '可用配置：' : 'Available:')
+        + '\n' + (lang === 'zh' ? '账号池' : 'Groups') + ': ' + groups
+        + '\n' + (lang === 'zh' ? '代理' : 'Proxies') + ': ' + proxies
+        + '\n' + (lang === 'zh' ? '模型' : 'Models') + ': ' + models;
+    }
+  } catch (e) { /* 静默失败，保留默认值 */ }
 }
 
 function saveSub2apiConfig() {
@@ -360,22 +444,25 @@ function syncSub2api() {
   }).catch(e => { st.textContent = (lang === 'zh' ? '错误: ' : 'error: ') + e.message; st.className = 'sso-config-state bad'; });
 }
 
-function discoverSub2api() {
+function discoverSub2api(silent) {
   const base = $('sub2apiBaseUrl').value.trim();
   const email = $('sub2apiEmail').value.trim();
   const pw = $('sub2apiPassword').value;
   const st = $('ssoSyncState');
   const hint = $('ssoDiscoverHint');
   if (!base || !email) {
+    if (silent) return;
     const msg = lang === 'zh' ? '请先填写 sub2api 地址和邮箱' : 'Please fill base URL and email';
     st.textContent = msg; st.className = 'sso-config-state bad';
     ssoToast(msg);
     return;
   }
-  st.textContent = lang === 'zh' ? '获取中…' : 'Discovering…';
-  st.className = 'sso-config-state';
-  hint.textContent = '';
-  if (!pw) {
+  if (!silent) {
+    st.textContent = lang === 'zh' ? '获取中…' : 'Discovering…';
+    st.className = 'sso-config-state';
+  }
+  if (hint) hint.textContent = '';
+  if (!pw && hint && !silent) {
     hint.textContent = lang === 'zh' ? '密码框为空，将尝试使用本地已保存密码…' : 'Password empty, will use saved password…';
   }
   fetch('/api/sso/discover-sub2api', {
@@ -385,26 +472,37 @@ function discoverSub2api() {
   }).then(r => r.json()).then(d => {
     if (d.ok) {
       const s = d.suggested || {};
-      if (s.group_id != null) $('sub2apiGroupId').value = s.group_id;
-      if (s.proxy_key) $('sub2apiProxyKey').value = s.proxy_key;
-      if (s.model) $('sub2apiGrokModel').value = s.model;
+      const currentGroup = $('sub2apiGroupId').value;
+      const currentProxy = $('sub2apiProxyKey').value;
+      const currentModel = $('sub2apiGrokModel').value;
+      populateSub2apiSelects(d.groups, d.proxies, d.models, {
+        group_id: currentGroup || s.group_id,
+        proxy_key: currentProxy || s.proxy_key,
+        model: currentModel || s.model
+      });
       const groups = (d.groups || []).map(g => '#' + g.id + ' ' + g.name + ' (' + g.platform + ')').join(' / ');
       const proxies = (d.proxies || []).map(p => '#' + p.id + ' ' + p.name + ' [' + p.status + ']').join(' / ');
       const models = (d.models || []).join(', ') || (lang === 'zh' ? '无' : 'none');
-      hint.textContent = (lang === 'zh' ? '已自动回填。可用配置：' : 'Auto-filled. Available:')
+      if (hint) hint.textContent = (lang === 'zh' ? '已自动回填。可用配置：' : 'Auto-filled. Available:')
         + '\n' + (lang === 'zh' ? '账号池' : 'Groups') + ': ' + groups
         + '\n' + (lang === 'zh' ? '代理' : 'Proxies') + ': ' + proxies
         + '\n' + (lang === 'zh' ? '模型' : 'Models') + ': ' + models;
-      st.textContent = lang === 'zh' ? '获取成功' : 'Discovered';
-      ssoToast(lang === 'zh' ? '配置已获取' : 'Config discovered');
+      if (!silent) {
+        st.textContent = lang === 'zh' ? '获取成功' : 'Discovered';
+        ssoToast(lang === 'zh' ? '配置已获取' : 'Config discovered');
+      }
     } else {
-      st.textContent = (lang === 'zh' ? '失败: ' : 'failed: ') + (d.reason || '');
-      st.className = 'sso-config-state bad';
-      ssoToast(lang === 'zh' ? '获取失败' : 'Discover failed');
+      if (!silent) {
+        st.textContent = (lang === 'zh' ? '失败: ' : 'failed: ') + (d.reason || '');
+        st.className = 'sso-config-state bad';
+        ssoToast(lang === 'zh' ? '获取失败' : 'Discover failed');
+      }
     }
   }).catch(e => {
-    st.textContent = (lang === 'zh' ? '错误: ' : 'error: ') + e.message;
-    st.className = 'sso-config-state bad';
+    if (!silent) {
+      st.textContent = (lang === 'zh' ? '错误: ' : 'error: ') + e.message;
+      st.className = 'sso-config-state bad';
+    }
   });
 }
 

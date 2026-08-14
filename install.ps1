@@ -16,6 +16,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoUrl = "https://github.com/quanshizuiliangdezai/zhuceji.git"
 $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { "zhuceji" }
+$Branch = if ($env:BRANCH) { $env:BRANCH } else { "feat/sub2api-discover" }
 
 function Run-Deploy {
   param($Root)
@@ -30,15 +31,17 @@ if (Test-Path "deploy.ps1") {
 }
 
 if (Test-Path $InstallDir) {
-  Write-Host "[*] 目录 $InstallDir 已存在，进入更新 ..."
+  Write-Host "[*] 目录 $InstallDir 已存在，切换到 $Branch 并更新 ..."
   Set-Location $InstallDir
   if (Test-Path .git) {
+    git fetch origin $Branch 2>$null
+    git checkout $Branch 2>$null
     git pull --ff-only 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Host "    (git pull 失败，继续使用当前代码)" }
   }
 } else {
-  Write-Host "[*] 克隆仓库到 .\$InstallDir ..."
-  git clone $RepoUrl $InstallDir
+  Write-Host "[*] 克隆仓库 $Branch 分支到 .\$InstallDir ..."
+  git clone --branch $Branch $RepoUrl $InstallDir
   Set-Location $InstallDir
 }
 

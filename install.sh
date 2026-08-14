@@ -17,6 +17,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/quanshizuiliangdezai/zhuceji.git"
 INSTALL_DIR="${INSTALL_DIR:-zhuceji}"
+BRANCH="${BRANCH:-feat/sub2api-discover}"
 
 if [ -f "deploy.sh" ]; then
   echo "[*] 检测到当前目录已是仓库根，直接执行 deploy.sh ..."
@@ -24,14 +25,16 @@ if [ -f "deploy.sh" ]; then
 fi
 
 if [ -d "$INSTALL_DIR" ]; then
-  echo "[*] 目录 $INSTALL_DIR 已存在，进入更新 ..."
+  echo "[*] 目录 $INSTALL_DIR 已存在，切换到 $BRANCH 并更新 ..."
   cd "$INSTALL_DIR"
   if [ -d .git ]; then
+    git fetch origin "$BRANCH" || true
+    git checkout "$BRANCH" || true
     git pull --ff-only || echo "    (git pull 失败，继续使用当前代码)"
   fi
 else
-  echo "[*] 克隆仓库到 ./$INSTALL_DIR ..."
-  git clone "$REPO_URL" "$INSTALL_DIR"
+  echo "[*] 克隆仓库 $BRANCH 分支到 ./$INSTALL_DIR ..."
+  git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
 
