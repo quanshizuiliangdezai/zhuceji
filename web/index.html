@@ -364,15 +364,20 @@ function discoverSub2api() {
   const base = $('sub2apiBaseUrl').value.trim();
   const email = $('sub2apiEmail').value.trim();
   const pw = $('sub2apiPassword').value;
-  if (!base || !email || !pw) {
-    ssoToast(lang === 'zh' ? '请先填写 sub2api 地址、邮箱、密码' : 'Please fill base URL, email and password');
-    return;
-  }
   const st = $('ssoSyncState');
   const hint = $('ssoDiscoverHint');
+  if (!base || !email) {
+    const msg = lang === 'zh' ? '请先填写 sub2api 地址和邮箱' : 'Please fill base URL and email';
+    st.textContent = msg; st.className = 'sso-config-state bad';
+    ssoToast(msg);
+    return;
+  }
   st.textContent = lang === 'zh' ? '获取中…' : 'Discovering…';
   st.className = 'sso-config-state';
   hint.textContent = '';
+  if (!pw) {
+    hint.textContent = lang === 'zh' ? '密码框为空，将尝试使用本地已保存密码…' : 'Password empty, will use saved password…';
+  }
   fetch('/api/sso/discover-sub2api', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

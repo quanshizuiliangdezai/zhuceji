@@ -814,8 +814,13 @@ async def discover_sub2api(request: Request):
     base = (body.get("base_url") or "").strip()
     email = (body.get("email") or "").strip()
     password = body.get("password") or ""
-    if not base or not email or not password:
-        return {"ok": False, "reason": "地址、邮箱、密码都不能为空"}
+    if not base or not email:
+        return {"ok": False, "reason": "sub2api 地址和邮箱不能为空"}
+    # 前端保存后会清空密码框；若未填写，尝试用本地已保存的密码
+    if not password:
+        password = engine.config.get("sub2api_password") or ""
+    if not password:
+        return {"ok": False, "reason": "未填写密码且本地无已保存密码，请先填写或保存配置"}
     try:
         return _sub2api_discover(base, email, password)
     except Exception as exc:  # noqa: BLE001
