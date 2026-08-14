@@ -269,18 +269,44 @@ def build_plink_args(cfg: dict) -> list:
     return args
 
 
+def build_ssh_test_args(cfg: dict) -> list:
+    """用于执行远程命令测试（不建隧道，不带 -R -N -T）。"""
+    args = [
+        "-p", str(int(cfg.get("ssh_port", 22))),
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ConnectTimeout=15",
+    ]
+    if cfg.get("auth") == "key":
+        kp = str(cfg.get("key_path", "")).strip()
+        if kp:
+            args += ["-i", kp]
+    else:
+        args += ["-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no"]
+    args.append("%s@%s" % (str(cfg.get("user", "root")).strip(), str(cfg.get("server", "")).strip()))
+    return args
+
+
+def build_plink_test_args(cfg: dict) -> list:
+    """plink 测试参数：只验证 SSH 可达与认证，不建隧道（不带 -R -N -T）。"""
+    port = int(cfg.get("ssh_port", 22))
+    user = str(cfg.get("user", "root")).strip()
+    server = str(cfg.get("server", "")).strip()
+    password = str(cfg.get("password", ""))
+    return [
+        "-P", str(port),
+        "-pw", password,
+        "%s@%s" % (user, server),
+    ]
+
+
 def client_invocation(cfg: dict, root: Path):
-    """返回 (exe, base_args, is_plink) 用于执行远程命令测试。base_args 已去掉 -N -T。"""
+    """返回 (exe, base_args, is_plink) 用于执行远程命令测试。base_args 不含 -N -T -R。"""
     if cfg.get("auth") == "password":
         plink = find_plink(cfg, root)
         if not plink:
             raise RuntimeError("未找到 plink，无法用密码测试/建立隧道，请先安装 plink")
-        exe = plink
-        base = [a for a in build_plink_args(cfg) if a not in ("-N", "-T")]
-        return exe, base, True
-    exe = ssh_exe()
-    base = [a for a in build_ssh_args(cfg) if a not in ("-N", "-T")]
-    return exe, base, False
+        return plink, build_plink_test_args(cfg), True
+    return ssh_exe(), build_ssh_test_args(cfg), False
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +349,7 @@ while ($true) {
         $plink = $cfg.plink_path
         if (-not $plink -or -not (Test-Path $plink)) { $plink = "plink" }
         $pargs = @('-N','-T','-P',"$port",'-R',"$remote`:127.0.0.1:$local",
-                   '-accept-new-host-keys','-keepalive','30','-pw',$cfg.password,"$user@$server")
+                   '-pw',$cfg.password,"$user@$server")
         Log "connecting (plink) $user@$server :$port  -R ${remote}:127.0.0.1:${local}"
         # echo y 喂入首次 host key 确认（后台无 TTY 时靠管道 stdin）
         echo y | & $plink @pargs
@@ -493,7 +519,7 @@ def test_ssh_reachable(cfg: dict, root: Path) -> dict:
     # plink 首次未知 host key 需从 stdin 喂 'y' 接受
     inp = "y\n" if is_plink else None
     try:
-        out = _run([exe] + base + ["echo", "tunnel_ok"], timeout=25, input_text=inp)
+        out = _run([exe] + base + ["echo", "tunnel_ok"], timeout=30, input_text=inp)
     except Exception as exc:
         return {"ok": False, "reachable": False, "message": "SSH 连接异常: %s" % exc}
     if out.returncode == 0 and "tunnel_ok" in out.stdout:
