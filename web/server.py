@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 import grok_register_ttk as engine
@@ -24,6 +24,7 @@ INDEX_HTML = Path(__file__).resolve().parent / "index.html"
 PROXY_POOL_JS = Path(__file__).resolve().parent / "proxy-pool.js"
 PROXY_POOL_CSS = Path(__file__).resolve().parent / "proxy-pool.css"
 CPA_DIR = ROOT / "cpa_auths"
+SERVER_JSON = ROOT / "server.json"
 GROK_SUBSCRIPTION_PROXY = "https://cli-chat-proxy.grok.com/v1"
 LOG_LIMIT = 2000
 
@@ -138,6 +139,71 @@ def health():
     return {"ok": True}
 
 
+@app.get("/api/server/config")
+def get_server_config():
+    return {"ok": True, "config": _load_server_json()}
+
+
+@app.put("/api/server/config")
+async def put_server_config(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="服务器配置必须是 JSON 对象")
+    current = _load_server_json()
+    host = str(data.get("host", current["host"])).strip()
+    try:
+        port = int(data.get("port", current["port"]))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="端口必须是整数") from exc
+    try:
+        workers = max(1, int(data.get("workers", current["workers"])))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="workers 必须是整数") from exc
+    if not host:
+        raise HTTPException(status_code=400, detail="监听地址不能为空")
+    if not 1 <= port <= 65535:
+        raise HTTPException(status_code=400, detail="端口必须在 1–65535 之间")
+    updated = {"host": host, "port": port, "workers": workers}
+    try:
+        _save_server_json(updated)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="保存服务器配置失败: %s" % exc) from exc
+    return {"ok": True, "config": updated}
+
+
+@app.post("/api/server/restart")
+def restart_server(background_tasks: BackgroundTasks):
+    import subprocess
+    import sys
+
+    cfg = _load_server_json()
+    helper = [sys.executable, "-m", "web.restart_helper",
+              "--python", sys.executable,
+              "--cwd", str(ROOT),
+              "--host", cfg["host"],
+              "--port", str(cfg["port"]),
+              "--workers", str(cfg["workers"])]
+    try:
+        subprocess.Popen(
+            helper,
+            cwd=str(ROOT),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                           | getattr(subprocess, "DETACHED_PROCESS", 0)),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="启动重启助手失败: %s" % exc) from exc
+
+    def _exit_after_delay():
+        time.sleep(2)
+        os._exit(0)
+
+    background_tasks.add_task(_exit_after_delay)
+    return {"ok": True, "message": "服务正在重启到 %s:%d" % (cfg["host"], cfg["port"])}
+
+
 @app.get("/api/config")
 def get_config():
     return {"ok": True, "config": _load_config_if_idle()}
@@ -224,6 +290,32 @@ def logs(after: int = Query(default=0, ge=0)):
         entries = [dict(item) for item in _logs if int(item["seq"]) > int(after)]
         latest = int(_log_seq)
     return {"ok": True, "latest": latest, "entries": entries}
+
+
+def _load_server_json() -> dict[str, Any]:
+    defaults = {"host": "127.0.0.1", "port": 8092, "workers": 1}
+    if SERVER_JSON.is_file():
+        try:
+            data = json.loads(SERVER_JSON.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for k in defaults:
+                    if k in data:
+                        defaults[k] = data[k]
+        except Exception:
+            pass
+    return defaults
+
+
+def _save_server_json(data: dict[str, Any]) -> dict[str, Any]:
+    clean = {
+        "host": str(data.get("host", "127.0.0.1")).strip(),
+        "port": int(data.get("port", 8092)),
+        "workers": max(1, int(data.get("workers", 1))),
+    }
+    if not clean["host"]:
+        clean["host"] = "127.0.0.1"
+    SERVER_JSON.write_text(json.dumps(clean, indent=2, ensure_ascii=False), encoding="utf-8")
+    return clean
 
 
 def _parse_expiry(value) -> Optional[datetime.datetime]:
@@ -350,6 +442,7 @@ def sso_accounts():
 @app.get("/api/sso/export-sub2api")
 def sso_export_sub2api(email: Optional[str] = None):
     accounts = []
+    concurrency = int(engine.config.get("sub2api_account_concurrency") or 1)
     for data in _read_sso_accounts():
         if email and data.get("email") != email:
             continue
@@ -376,7 +469,7 @@ def sso_export_sub2api(email: Optional[str] = None):
             "type": "oauth",
             "credentials": credentials,
             "extra": {},
-            "concurrency": 1,
+            "concurrency": max(1, concurrency),
             "priority": 0,
             "rate_multiplier": 1,
             "auto_pause_on_expired": True,
@@ -464,10 +557,11 @@ def main() -> None:
     import argparse
     import uvicorn
 
+    defaults = _load_server_json()
     parser = argparse.ArgumentParser(description="grok-register WebUI 服务")
-    parser.add_argument("--host", default="127.0.0.1", help="监听地址 (默认 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8092, help="监听端口 (默认 8092)")
-    parser.add_argument("--workers", type=int, default=1, help="worker 数量 (默认 1)")
+    parser.add_argument("--host", default=defaults.get("host", "127.0.0.1"), help="监听地址 (默认 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=defaults.get("port", 8092), help="监听端口 (默认 8092)")
+    parser.add_argument("--workers", type=int, default=defaults.get("workers", 1), help="worker 数量 (默认 1)")
     args = parser.parse_args()
     uvicorn.run("web.server:app", host=args.host, port=args.port, workers=args.workers)
 
@@ -480,7 +574,7 @@ _SUB2API_KEYS = (
     "sub2api_group_id", "sub2api_auto_sync", "sub2api_sync_interval_sec",
     "sub2api_proxy_key", "sub2api_grok_model",
     "sub2api_target_available", "sub2api_max_register_batch",
-    "sub2api_pool_check_interval_sec",
+    "sub2api_pool_check_interval_sec", "sub2api_account_concurrency",
 )
 _SUB2API_DEFAULT_PROXY_KEY = "http|127.0.0.1|10808||"
 
@@ -499,6 +593,7 @@ def _sub2api_cfg() -> dict:
         "target_available": int(c.get("sub2api_target_available") or 0),
         "max_register_batch": max(1, int(c.get("sub2api_max_register_batch") or 5)),
         "pool_check_interval": max(60, int(c.get("sub2api_pool_check_interval_sec") or 300)),
+        "concurrency": max(1, int(c.get("sub2api_account_concurrency") or 1)),
     }
 
 
@@ -532,7 +627,7 @@ def _sub2api_list_grok(token: str, base: str) -> list:
     return json.loads(b).get("data", {}).get("items", [])
 
 
-def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model: str = "grok-4.6"):
+def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model: str = "grok-4.6", concurrency: int = 1):
     creds = {"access_token": acc["access_token"], "base_url": acc["base_url"] or GROK_SUBSCRIPTION_PROXY}
     if acc.get("refresh_token"):
         creds["refresh_token"] = acc["refresh_token"]
@@ -547,7 +642,7 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model:
         "platform": "grok", "type": "oauth",
         "credentials": creds,
         "proxy_key": proxy_key,
-        "concurrency": 1, "priority": 1, "rate_multiplier": 1,
+        "concurrency": max(1, int(concurrency or 1)), "priority": 1, "rate_multiplier": 1,
         "auto_pause_on_expired": True,
     }]}
     s, b = _http_json("POST", base + "/api/v1/admin/accounts/batch", token=token, body=payload)
@@ -598,7 +693,7 @@ def _sso_sync_once() -> dict:
                         _sub2api_set_model(a["id"], cfg["model"], cfg["base_url"], token)
                         modeled += 1
             else:
-                new_id = _sub2api_import_one(acc, cfg["base_url"], token, cfg["proxy_key"], cfg["model"])
+                new_id = _sub2api_import_one(acc, cfg["base_url"], token, cfg["proxy_key"], cfg["model"], cfg.get("concurrency", 1))
                 if new_id:
                     _sub2api_link_group(new_id, cfg["group_id"], cfg["base_url"], token)
                     added += 1
@@ -841,6 +936,7 @@ def get_sub2api_config():
         "sub2api_target_available": int(c.get("sub2api_target_available") or 0),
         "sub2api_max_register_batch": int(c.get("sub2api_max_register_batch") or 5),
         "sub2api_pool_check_interval_sec": int(c.get("sub2api_pool_check_interval_sec") or 300),
+        "sub2api_account_concurrency": max(1, int(c.get("sub2api_account_concurrency") or 1)),
         "password_set": bool(c.get("sub2api_password")),
     }}
 
@@ -854,7 +950,7 @@ async def put_sub2api_config(request: Request):
     int_keys = {
         "sub2api_group_id", "sub2api_sync_interval_sec",
         "sub2api_target_available", "sub2api_max_register_batch",
-        "sub2api_pool_check_interval_sec",
+        "sub2api_pool_check_interval_sec", "sub2api_account_concurrency",
     }
     bool_keys = {"sub2api_auto_sync"}
     for k, v in updates.items():

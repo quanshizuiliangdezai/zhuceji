@@ -55,6 +55,7 @@
 .sso-pool-status .bad{color:var(--red)}
 .sso-pool-status .ok{color:var(--green)}
 @media(max-width:760px){.sso-config-grid{grid-template-columns:1fr 1fr}}
+.modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}.modal.show{opacity:1;pointer-events:auto}.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px)}.modal-card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);width:min(420px,92vw);padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}.modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}.modal-head h3{margin:0;font-size:16px}.modal-head .ghost{width:32px;height:32px;border-radius:8px;background:transparent;border:1px solid var(--line);color:var(--fg);font-size:18px;cursor:pointer}.modal-head .ghost:hover{background:var(--panel)}.modal-body{display:flex;flex-direction:column;gap:12px}.modal-body .sso-field input{width:100%}.modal-hint{color:var(--muted);font-size:12px;line-height:1.5;margin:0}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.modal-actions button{height:36px;padding:0 16px;border-radius:8px;font-weight:650;cursor:pointer;border:0}.modal-actions button.primary{background:var(--accent);color:#080b00}
 </style>
 </head>
 <body>
@@ -65,6 +66,7 @@
     <span class="console-pill" data-i18n="console">控制台</span>
   </div>
   <div class="spacer"></div>
+  <button id="serverSettingsBtn" class="action" type="button" title="面板设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-4v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.3 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.1v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg><span class="btn-text" data-i18n="panelSettings">面板设置</span></button>
   <div class="lang-switch" role="group" aria-label="Language">
     <button id="langZh" class="lang-btn" type="button">中文</button>
     <button id="langEn" class="lang-btn" type="button">EN</button>
@@ -98,8 +100,21 @@
       <div id="terminal" class="terminal-body"><div id="emptyLog" class="empty-log" data-i18n="logReady">[*] 控制台已就绪，等待指令...</div></div>
     </div>
   </section>
-  <div class="footer-note"><span data-i18n="localOnly">本地 WebUI · 127.0.0.1:8092</span><span id="saveState"></span></div>
+  <div class="footer-note"><span data-i18n="localOnly">本地 WebUI</span><span id="panelAddress"> · 127.0.0.1:8092</span><span id="saveState"></span></div>
 </main>
+<div id="serverSettingsModal" class="modal" hidden>
+  <div class="modal-backdrop" onclick="closeServerSettings()"></div>
+  <div class="modal-card">
+    <div class="modal-head"><h3 data-i18n="panelSettings">面板设置</h3><button id="closeServerModal" class="ghost" type="button">×</button></div>
+    <div class="modal-body">
+      <label class="sso-field"><span>监听 IP</span><input id="panelHost" value="127.0.0.1" placeholder="127.0.0.1"></label>
+      <label class="sso-field"><span>监听端口</span><input id="panelPort" type="number" value="8092" min="1" max="65535" placeholder="8092"></label>
+      <label class="sso-field"><span>Workers</span><input id="panelWorkers" type="number" value="1" min="1" max="8" placeholder="1"></label>
+      <p class="modal-hint">修改后保存并重启，服务会切换到新地址。重启完成后页面会自动跳转。</p>
+    </div>
+    <div class="modal-actions"><button id="saveServerConfigBtn" class="primary">保存并重启</button></div>
+  </div>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 const icons = {
@@ -163,6 +178,7 @@ function renderFields() {
         + '<label class="sso-field"><span>目标账号池 ID (grok)</span><select id="sub2apiGroupId"><option value="8">#8 cs2 (grok)</option></select></label>'
         + '<label class="sso-field"><span>代理 Key (可选)</span><select id="sub2apiProxyKey"><option value="http|127.0.0.1|10808||">#2 local-10808 [active]</option></select></label>'
         + '<label class="sso-field"><span>grok 模型 (自动填)</span><select id="sub2apiGrokModel"><option value="grok-4.6">grok-4.6</option></select></label>'
+        + '<label class="sso-field"><span>账号并发数</span><input id="sub2apiAccountConcurrency" type="number" value="1" min="1" max="100"></label>'
         + '<label class="sso-field"><span>同步间隔 (秒)</span><input id="sub2apiInterval" type="number" value="3600"></label>'
         + '<label class="sso-field"><span>目标可用数量 (0=关闭智能补充)</span><input id="sub2apiTargetAvailable" type="number" value="0" min="0" max="1000"></label>'
         + '<label class="sso-field"><span>单次最大补充</span><input id="sub2apiMaxBatch" type="number" value="5" min="1" max="50"></label>'
@@ -361,6 +377,7 @@ function loadSub2apiConfig() {
     $('sub2apiTargetAvailable').value = c.sub2api_target_available == null ? 0 : c.sub2api_target_available;
     $('sub2apiMaxBatch').value = c.sub2api_max_register_batch || 5;
     $('sub2apiPoolInterval').value = c.sub2api_pool_check_interval_sec || 300;
+    $('sub2apiAccountConcurrency').value = c.sub2api_account_concurrency || 1;
     $('sub2apiAutoSync').checked = !!c.sub2api_auto_sync;
     // 如果已配置地址和邮箱，自动拉取一次可选列表，把 group/proxy/model 变成下拉框
     if (c.sub2api_base_url && c.sub2api_email) {
@@ -416,6 +433,7 @@ function saveSub2apiConfig() {
     sub2api_target_available: Math.max(0, Number($('sub2apiTargetAvailable').value) || 0),
     sub2api_max_register_batch: Math.max(1, Number($('sub2apiMaxBatch').value) || 5),
     sub2api_pool_check_interval_sec: Math.max(60, Number($('sub2apiPoolInterval').value) || 300),
+    sub2api_account_concurrency: Math.max(1, Number($('sub2apiAccountConcurrency').value) || 1),
     sub2api_auto_sync: $('sub2apiAutoSync').checked,
   };
   fetch('/api/sso/sub2api-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -564,6 +582,68 @@ function bindSub2api() {
   const fill = $('sub2apiFillBtn'); if (fill) fill.onclick = fillPool;
 }
 
+function displayPanelHost(host) {
+  if (!host || host === '0.0.0.0' || host === '::' || host === '::0') return window.location.hostname || '127.0.0.1';
+  return host;
+}
+
+function updatePanelAddress(host, port) {
+  const el = $('panelAddress');
+  if (!el) return;
+  el.textContent = ' · ' + displayPanelHost(host) + ':' + (port || 8092);
+}
+
+async function loadServerConfig() {
+  try {
+    const r = await fetch('/api/server/config');
+    const d = await r.json();
+    if (d.ok && d.config) {
+      const c = d.config;
+      $('panelHost').value = c.host || '127.0.0.1';
+      $('panelPort').value = c.port || 8092;
+      $('panelWorkers').value = c.workers || 1;
+      updatePanelAddress(c.host, c.port);
+    }
+  } catch (e) {}
+}
+
+function openServerSettings() {
+  loadServerConfig();
+  $('serverSettingsModal').classList.add('show');
+  $('serverSettingsModal').removeAttribute('hidden');
+}
+
+function closeServerSettings() {
+  $('serverSettingsModal').classList.remove('show');
+  setTimeout(() => $('serverSettingsModal').setAttribute('hidden', ''), 200);
+}
+
+async function saveAndRestartServer() {
+  const host = ($('panelHost').value || '127.0.0.1').trim();
+  const port = Math.max(1, Math.min(65535, Number($('panelPort').value) || 8092));
+  const workers = Math.max(1, Number($('panelWorkers').value) || 1);
+  if (!host) { setNotice('监听 IP 不能为空', true); return; }
+  try {
+    const r = await fetch('/api/server/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, port, workers })
+    });
+    const d = await r.json();
+    if (!r.ok) { setNotice('保存失败: ' + (d.detail || ''), true); return; }
+    updatePanelAddress(host, port);
+    const rr = await fetch('/api/server/restart', { method: 'POST' });
+    const rd = await rr.json();
+    if (!rr.ok) { setNotice('重启失败: ' + (rd.detail || ''), true); return; }
+    setNotice(rd.message || t('panelRestarting'));
+    setTimeout(() => {
+      window.location.href = 'http://' + displayPanelHost(host) + ':' + port;
+    }, 5000);
+  } catch (e) {
+    setNotice('重启异常: ' + e.message, true);
+  }
+}
+
 function bind() {
   renderFields(); applyLanguage();
   $('langZh').onclick = () => setLanguage('zh'); $('langEn').onclick = () => setLanguage('en');
@@ -571,7 +651,14 @@ function bind() {
   $('startBtn').onclick = () => startJob().catch(e => setNotice(e.message, true));
   $('stopBtn').onclick = () => stopJob().catch(e => setNotice(e.message, true));
   $('copyBtn').onclick = () => copyLogs(); $('clearBtn').onclick = () => clearLogs();
+  const serverSettingsBtn = $('serverSettingsBtn');
+  if (serverSettingsBtn) serverSettingsBtn.onclick = openServerSettings;
+  const closeServerModal = $('closeServerModal');
+  if (closeServerModal) closeServerModal.onclick = closeServerSettings;
+  const saveServerConfigBtn = $('saveServerConfigBtn');
+  if (saveServerConfigBtn) saveServerConfigBtn.onclick = saveAndRestartServer;
   loadConfig().catch(e => setNotice(e.message, true));
+  loadServerConfig();
   bindSso(); loadSso();
   pollStatus(); pollLogs(); loadPoolStatus();
   setInterval(pollStatus, 1000); setInterval(pollLogs, 1000); setInterval(loadPoolStatus, 10000);
