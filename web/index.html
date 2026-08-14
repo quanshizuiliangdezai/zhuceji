@@ -49,6 +49,10 @@
 .sso-config-actions button:not(.ghost){background:var(--accent);color:#080b00;border:0}
 .sso-config-actions button:not(.ghost):hover{background:var(--accent2)}
 .sso-discover-hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5;white-space:pre-wrap;min-height:0}
+.sso-pool-status{font-size:12px;color:var(--soft);margin-top:12px;padding:10px 12px;background:var(--panel3);border:1px solid var(--line);border-radius:8px;line-height:1.6;min-height:40px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sso-pool-status .num{font-weight:700;color:var(--accent)}
+.sso-pool-status .bad{color:var(--red)}
+.sso-pool-status .ok{color:var(--green)}
 @media(max-width:760px){.sso-config-grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
@@ -159,9 +163,13 @@ function renderFields() {
         + '<label class="sso-field"><span>代理 Key (可选)</span><input id="sub2apiProxyKey" placeholder="http|127.0.0.1|10808||"></label>'
         + '<label class="sso-field"><span>grok 模型 (自动填)</span><input id="sub2apiGrokModel" placeholder="grok-4.6"></label>'
         + '<label class="sso-field"><span>同步间隔 (秒)</span><input id="sub2apiInterval" type="number" value="3600"></label>'
+        + '<label class="sso-field"><span>目标可用数量 (0=关闭智能补充)</span><input id="sub2apiTargetAvailable" type="number" value="0" min="0" max="1000"></label>'
+        + '<label class="sso-field"><span>单次最大补充</span><input id="sub2apiMaxBatch" type="number" value="5" min="1" max="50"></label>'
+        + '<label class="sso-field"><span>池检查间隔 (秒)</span><input id="sub2apiPoolInterval" type="number" value="300" min="60"></label>'
         + '</div>'
         + '<div class="sso-config-row"><label class="sso-check"><input type="checkbox" id="sub2apiAutoSync"> 启用定时自动同步 + 清理失效</label>'
-        + '<div class="sso-config-actions"><button class="ghost" id="sub2apiDiscoverBtn">获取配置</button><button class="ghost" id="sub2apiSaveBtn">保存配置</button><button id="sub2apiSyncBtn">立即同步</button></div></div>'
+        + '<div class="sso-config-actions"><button class="ghost" id="sub2apiDiscoverBtn">获取配置</button><button class="ghost" id="sub2apiSaveBtn">保存配置</button><button class="ghost" id="sub2apiFillBtn">立即补充</button><button id="sub2apiSyncBtn">立即同步</button></div></div>'
+        + '<div class="sso-pool-status" id="ssoPoolStatus"></div>'
         + '<div class="sso-discover-hint" id="ssoDiscoverHint"></div>'
         + '</div>'
         + '<div id="ssoList" class="sso-list"><div class="sso-empty">' + ts('empty') + '</div></div><div id="ssoToast" class="sso-toast"></div>';
@@ -252,7 +260,7 @@ async function startJob() { if (dirty.size && !await saveConfig()) return; setNo
 async function stopJob() { const r = await fetch('/api/stop', { method: 'POST' }); const d = await r.json(); if (!r.ok) setNotice(d.detail || t('stopFailed'), true); else setNotice(d.stopped ? t('stopSent') : t('noJob')); }
 function appendLine(entry) { const body = $('terminal'), empty = $('emptyLog'); if (empty) empty.remove(); const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80; const div = document.createElement('div'); div.className = 'line'; const line = String(entry.line || ''); if (line.includes('[+]')) div.classList.add('ok'); else if (line.includes('[!]')) div.classList.add('bad'); else if (line.includes('[*]')) div.classList.add('info'); else if (line.toLowerCase().includes('warn')) div.classList.add('warn'); div.textContent = line; body.appendChild(div); while (body.children.length > 2000) body.removeChild(body.firstChild); if (nearBottom) body.scrollTop = body.scrollHeight; }
 async function pollLogs() { try { const r = await fetch('/api/logs?after=' + lastSeq); if (!r.ok) return; const d = await r.json(); serverLatest = d.latest || lastSeq; for (const e of d.entries || []) { appendLine(e); lastSeq = Math.max(lastSeq, Number(e.seq) || 0); } } catch (_) {} }
-function updateStatusText(s = {}) { lastStatus = s; const dot = $('statusDot'); dot.className = 'status-dot' + (running ? ' running' : (s.cancelled ? ' cancelled' : '')); $('sStatus').textContent = running ? t('running') : (s.cancelled ? t('stopped') : t('idle')); $('startBtn').hidden = running; $('stopBtn').hidden = !running; }
+function updateStatusText(s = {}) { lastStatus = s; const dot = $('statusDot'); dot.className = 'status-dot' + (running ? ' running' : (s.cancelled ? ' cancelled' : '')); const modeText = s.mode === 'smart_fill' ? t('smartFill') : (s.mode === 'register' ? t('register') : t('running')); $('sStatus').textContent = running ? modeText : (s.cancelled ? t('stopped') : t('idle')); $('startBtn').hidden = running; $('stopBtn').hidden = !running; }
 async function pollStatus() { try { const r = await fetch('/api/status'); if (!r.ok) return; const s = await r.json(); running = !!s.running; $('sTarget').textContent = s.target || 0; $('sSuccess').textContent = s.success || 0; $('sFail').textContent = s.fail || 0; $('sPending').textContent = s.pending || 0; $('sWarnings').textContent = s.warnings || 0; updateStatusText(s); setFormDisabled(running); if (s.error) setNotice(s.error, true); } catch (_) {} }
 async function copyLogs() { const text = [...$('terminal').querySelectorAll('.line')].map(x => x.textContent).join('\n'); try { await navigator.clipboard.writeText(text); setNotice(t('copied')); } catch (_) { setNotice(t('copyFailed'), true); } }
 function clearLogs() { const body = $('terminal'); body.innerHTML = '<div id="emptyLog" class="empty-log">' + t('logReady') + '</div>'; lastSeq = serverLatest; }
@@ -304,7 +312,11 @@ function loadSub2apiConfig() {
     $('sub2apiProxyKey').value = c.sub2api_proxy_key || 'http|127.0.0.1|10808||';
     $('sub2apiGrokModel').value = c.sub2api_grok_model || 'grok-4.6';
     $('sub2apiInterval').value = c.sub2api_sync_interval_sec || 3600;
+    $('sub2apiTargetAvailable').value = c.sub2api_target_available == null ? 0 : c.sub2api_target_available;
+    $('sub2apiMaxBatch').value = c.sub2api_max_register_batch || 5;
+    $('sub2apiPoolInterval').value = c.sub2api_pool_check_interval_sec || 300;
     $('sub2apiAutoSync').checked = !!c.sub2api_auto_sync;
+    loadPoolStatus();
   }).catch(() => {});
 }
 
@@ -317,6 +329,9 @@ function saveSub2apiConfig() {
     sub2api_proxy_key: $('sub2apiProxyKey').value.trim(),
     sub2api_grok_model: $('sub2apiGrokModel').value.trim() || 'grok-4.6',
     sub2api_sync_interval_sec: Number($('sub2apiInterval').value) || 3600,
+    sub2api_target_available: Math.max(0, Number($('sub2apiTargetAvailable').value) || 0),
+    sub2api_max_register_batch: Math.max(1, Number($('sub2apiMaxBatch').value) || 5),
+    sub2api_pool_check_interval_sec: Math.max(60, Number($('sub2apiPoolInterval').value) || 300),
     sub2api_auto_sync: $('sub2apiAutoSync').checked,
   };
   fetch('/api/sso/sub2api-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -388,10 +403,62 @@ function discoverSub2api() {
   });
 }
 
+async function loadPoolStatus() {
+  const box = $('ssoPoolStatus'); if (!box) return;
+  try {
+    const r = await fetch('/api/sso/pool-status');
+    const d = await r.json();
+    if (!d.ok) {
+      box.innerHTML = '<span>' + (lang === 'zh' ? '池状态：' : 'Pool: ') + (d.reason || 'unknown') + '</span>';
+      return;
+    }
+    const target = d.target || 0;
+    const avail = d.available ?? 0;
+    const gap = d.gap || 0;
+    const total = d.total || 0;
+    const expired = d.expired || 0;
+    const smartOn = target > 0;
+    const okClass = gap <= 0 ? 'ok' : 'bad';
+    const left = (lang === 'zh'
+      ? '目标 <span class="num">' + target + '</span> · 可用 <span class="num ' + okClass + '">' + avail + '</span> · 缺口 <span class="num ' + okClass + '">' + gap + '</span> · 总计 ' + total + ' · 待清理 ' + expired
+      : 'Target <span class="num">' + target + '</span> · Available <span class="num ' + okClass + '">' + avail + '</span> · Gap <span class="num ' + okClass + '">' + gap + '</span> · Total ' + total + ' · To clean ' + expired);
+    const right = smartOn
+      ? (lang === 'zh' ? '智能补充已启用' : 'Smart fill ON')
+      : (lang === 'zh' ? '智能补充已关闭' : 'Smart fill OFF');
+    box.innerHTML = '<span>' + left + '</span><span>' + right + '</span>';
+  } catch (e) {
+    const box = $('ssoPoolStatus'); if (!box) return;
+    box.innerHTML = '<span>' + (lang === 'zh' ? '池状态加载失败' : 'Pool status failed') + '</span>';
+  }
+}
+
+function fillPool() {
+  const st = $('ssoSyncState');
+  st.textContent = lang === 'zh' ? '补充中…' : 'Filling…';
+  st.className = 'sso-config-state';
+  fetch('/api/sso/pool-fill', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      st.textContent = (lang === 'zh'
+        ? '已启动补充: 缺口 ' + (d.gap ?? '?') + '，本次 ' + d.filled
+        : 'Fill started: gap ' + (d.gap ?? '?') + ', batch ' + d.filled);
+      ssoToast(lang === 'zh' ? '智能补充已启动' : 'Smart fill started');
+    } else {
+      st.textContent = (lang === 'zh' ? '补充失败: ' : 'Fill failed: ') + (d.reason || '');
+      st.className = 'sso-config-state bad';
+      ssoToast(lang === 'zh' ? '补充未启动' : 'Fill not started');
+    }
+    loadPoolStatus();
+  }).catch(e => {
+    st.textContent = (lang === 'zh' ? '错误: ' : 'error: ') + e.message;
+    st.className = 'sso-config-state bad';
+  });
+}
+
 function bindSub2api() {
   const discover = $('sub2apiDiscoverBtn'); if (discover) discover.onclick = discoverSub2api;
   const save = $('sub2apiSaveBtn'); if (save) save.onclick = saveSub2apiConfig;
   const sync = $('sub2apiSyncBtn'); if (sync) sync.onclick = syncSub2api;
+  const fill = $('sub2apiFillBtn'); if (fill) fill.onclick = fillPool;
 }
 
 function bind() {
@@ -403,8 +470,8 @@ function bind() {
   $('copyBtn').onclick = () => copyLogs(); $('clearBtn').onclick = () => clearLogs();
   loadConfig().catch(e => setNotice(e.message, true));
   bindSso(); loadSso();
-  pollStatus(); pollLogs();
-  setInterval(pollStatus, 1000); setInterval(pollLogs, 1000);
+  pollStatus(); pollLogs(); loadPoolStatus();
+  setInterval(pollStatus, 1000); setInterval(pollLogs, 1000); setInterval(loadPoolStatus, 10000);
 }
 bind();
 </script>

@@ -34,6 +34,7 @@ _job_thread: Optional[threading.Thread] = None
 _controller: Any = None
 _job_state = {
     "running": False,
+    "mode": "idle",
     "target": 0,
     "success": 0,
     "fail": 0,
@@ -103,6 +104,7 @@ def _run_job(count: int, controller: Any, accounts_file: str) -> None:
     finally:
         with _job_lock:
             _job_state["running"] = False
+            _job_state["mode"] = "idle"
             _job_state["finished_at"] = time.time()
             _job_state["cancelled"] = bool(
                 _job_state["cancelled"] or controller.should_stop()
@@ -255,6 +257,59 @@ def _is_expired(data: dict) -> bool:
     return expiry <= now
 
 
+def _utc_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _sub2api_account_expiry(a: dict) -> Optional[datetime.datetime]:
+    """返回账号最紧迫的过期时间（顶层 expires_at 或 credentials.expires_at）。"""
+    for key in ("expires_at",):
+        exp = _parse_expiry(a.get(key))
+        if exp:
+            return exp
+    creds = a.get("credentials") or {}
+    return _parse_expiry(creds.get("expires_at"))
+
+
+def _sub2api_is_temporarily_blocked(a: dict, now: Optional[datetime.datetime] = None) -> bool:
+    """是否处于临时不可调度窗口。"""
+    now = now or _utc_now()
+    for key in ("temp_unschedulable_until", "overload_until", "rate_limit_reset_at"):
+        t = _parse_expiry(a.get(key))
+        if t and now < t:
+            return True
+    return False
+
+
+def _sub2api_is_available(a: dict, now: Optional[datetime.datetime] = None) -> bool:
+    """sub2api 账号是否当前可用（status active、schedulable、未过期、未被临时封禁）。"""
+    now = now or _utc_now()
+    if (a.get("status") or "").lower() != "active":
+        return False
+    if a.get("schedulable") is False and not _sub2api_is_temporarily_blocked(a, now):
+        return False
+    exp = _sub2api_account_expiry(a)
+    if exp and now >= exp:
+        return False
+    if _sub2api_is_temporarily_blocked(a, now):
+        return False
+    return True
+
+
+def _sub2api_is_expired_for_purge(a: dict, now: Optional[datetime.datetime] = None) -> bool:
+    """判断账号是否应从 sub2api 中删除。"""
+    now = now or _utc_now()
+    status = (a.get("status") or "").lower()
+    if status in ("expired", "banned", "invalid", "disabled", "deleted"):
+        return True
+    if a.get("schedulable") is False and not _sub2api_is_temporarily_blocked(a, now):
+        return True
+    exp = _sub2api_account_expiry(a)
+    if exp and now >= exp:
+        return True
+    return False
+
+
 def _read_sso_accounts():
     accounts = []
     if CPA_DIR.is_dir():
@@ -360,6 +415,7 @@ def start():
 
         _job_state.update({
             "running": True,
+            "mode": "register",
             "target": count,
             "success": 0,
             "fail": 0,
@@ -417,6 +473,8 @@ _SUB2API_KEYS = (
     "sub2api_base_url", "sub2api_email", "sub2api_password",
     "sub2api_group_id", "sub2api_auto_sync", "sub2api_sync_interval_sec",
     "sub2api_proxy_key", "sub2api_grok_model",
+    "sub2api_target_available", "sub2api_max_register_batch",
+    "sub2api_pool_check_interval_sec",
 )
 _SUB2API_DEFAULT_PROXY_KEY = "http|127.0.0.1|10808||"
 
@@ -432,6 +490,9 @@ def _sub2api_cfg() -> dict:
         "interval": int(c.get("sub2api_sync_interval_sec") or 3600),
         "proxy_key": (c.get("sub2api_proxy_key") or _SUB2API_DEFAULT_PROXY_KEY).strip(),
         "model": (c.get("sub2api_grok_model") or "grok-4.6").strip(),
+        "target_available": int(c.get("sub2api_target_available") or 0),
+        "max_register_batch": max(1, int(c.get("sub2api_max_register_batch") or 5)),
+        "pool_check_interval": max(60, int(c.get("sub2api_pool_check_interval_sec") or 300)),
     }
 
 
@@ -536,14 +597,143 @@ def _sso_sync_once() -> dict:
                     _sub2api_link_group(new_id, cfg["group_id"], cfg["base_url"], token)
                     added += 1
         deleted = 0
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = _utc_now()
         for a in remote:
-            exp = _parse_expiry(a.get("expires_at"))
-            if exp and exp <= now:
+            if _sub2api_is_expired_for_purge(a, now):
                 _sub2api_delete(a["id"], cfg["base_url"], token)
                 deleted += 1
+        available = sum(1 for a in remote if cfg["group_id"] in (a.get("group_ids") or []) and _sub2api_is_available(a, now))
         return {"ok": True, "added": added, "linked": linked, "modeled": modeled, "deleted": deleted,
-                "local": len(local), "remote_total": len(remote)}
+                "local": len(local), "remote_total": len(remote), "available": available,
+                "target": cfg["target_available"]}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": str(exc)}
+
+
+def _run_fill_job(need: int, controller: Any, accounts_file: str) -> None:
+    global _controller
+    try:
+        _append_log("[*] 智能补充开始注册 %d 个账号" % need)
+        batch = engine.run_registration_common(
+            count=need,
+            log_callback=_append_log,
+            cancel_callback=controller.should_stop,
+            accounts_output_file=accounts_file,
+            observer=lambda batch, _account, _output: _update_progress(batch),
+        )
+        _update_progress(batch)
+        _append_log("[*] 智能补充注册完成，成功 %d / 失败 %d" % (batch.success_count, batch.fail_count))
+        _append_log("[*] 智能补充开始同步到 sub2api")
+        res = _sso_sync_once()
+        _append_log("[*] 智能补充同步结果: %s" % json.dumps(res, ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001
+        with _job_lock:
+            _job_state["error"] = str(exc)
+        _append_log("[!] 智能补充任务异常: %s" % exc)
+    finally:
+        with _job_lock:
+            _job_state["running"] = False
+            _job_state["mode"] = "idle"
+            _job_state["finished_at"] = time.time()
+            _job_state["cancelled"] = bool(
+                _job_state["cancelled"] or controller.should_stop()
+            )
+            _controller = None
+        _append_log("[*] 智能补充任务结束")
+
+
+def _sub2api_fill_once() -> dict:
+    global _controller
+    cfg = _sub2api_cfg()
+    if not cfg["target_available"]:
+        return {"ok": True, "reason": "target_available=0，未启用智能补充"}
+    if not cfg["base_url"] or not cfg["email"] or not cfg["password"]:
+        return {"ok": False, "reason": "sub2api 未配置（缺少地址/邮箱/密码）"}
+
+    sync_res = _sso_sync_once()
+    if not sync_res.get("ok"):
+        return sync_res
+
+    available = int(sync_res.get("available", 0))
+    target = cfg["target_available"]
+    need = max(0, target - available)
+    if need <= 0:
+        return {"ok": True, "filled": 0, "available": available, "target": target,
+                "reason": "已达目标，无需补充"}
+
+    need = min(need, cfg["max_register_batch"])
+
+    with _job_lock:
+        if _job_state["running"]:
+            return {"ok": True, "filled": 0, "available": available, "target": target,
+                    "reason": "已有任务运行中，本次不补充"}
+        engine.load_config()
+        try:
+            validated = engine.validate_run_requirements(dict(engine.config))
+        except engine.ConfigError as exc:
+            return {"ok": False, "reason": str(exc)}
+        engine.config.clear()
+        engine.config.update(validated)
+
+        controller = engine.CliStopController()
+        accounts_file = _new_accounts_file()
+        _job_state.update({
+            "running": True,
+            "mode": "smart_fill",
+            "target": need,
+            "success": 0,
+            "fail": 0,
+            "pending": 0,
+            "warnings": 0,
+            "cancelled": False,
+            "started_at": time.time(),
+            "finished_at": None,
+            "accounts_file": accounts_file,
+            "error": "",
+        })
+        _controller = controller
+        thread = threading.Thread(
+            target=_run_fill_job,
+            args=(need, controller, accounts_file),
+            name="grok-register-smart-fill",
+            daemon=True,
+        )
+        global _job_thread
+        _job_thread = thread
+        try:
+            thread.start()
+        except Exception:
+            with _job_lock:
+                _job_state["running"] = False
+                _job_state["finished_at"] = time.time()
+                _controller = None
+                _job_thread = None
+            raise
+    return {"ok": True, "filled": need, "available": available, "target": target,
+            "reason": "已启动智能补充"}
+
+
+def _sub2api_pool_status() -> dict:
+    cfg = _sub2api_cfg()
+    if not cfg["base_url"] or not cfg["email"] or not cfg["password"]:
+        return {"ok": False, "reason": "sub2api 未配置"}
+    try:
+        token = _sub2api_login(cfg)
+        remote = _sub2api_list_grok(token, cfg["base_url"])
+        now = _utc_now()
+        group_id = cfg["group_id"]
+        in_group = [a for a in remote if group_id in (a.get("group_ids") or [])]
+        available = sum(1 for a in in_group if _sub2api_is_available(a, now))
+        expired = sum(1 for a in in_group if _sub2api_is_expired_for_purge(a, now))
+        return {
+            "ok": True,
+            "target": cfg["target_available"],
+            "max_batch": cfg["max_register_batch"],
+            "available": available,
+            "total": len(in_group),
+            "expired": expired,
+            "gap": max(0, cfg["target_available"] - available),
+        }
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": str(exc)}
 
@@ -637,6 +827,9 @@ def get_sub2api_config():
         "sub2api_grok_model": c.get("sub2api_grok_model", "grok-4.6"),
         "sub2api_auto_sync": bool(c.get("sub2api_auto_sync", False)),
         "sub2api_sync_interval_sec": int(c.get("sub2api_sync_interval_sec") or 3600),
+        "sub2api_target_available": int(c.get("sub2api_target_available") or 0),
+        "sub2api_max_register_batch": int(c.get("sub2api_max_register_batch") or 5),
+        "sub2api_pool_check_interval_sec": int(c.get("sub2api_pool_check_interval_sec") or 300),
         "password_set": bool(c.get("sub2api_password")),
     }}
 
@@ -647,14 +840,20 @@ async def put_sub2api_config(request: Request):
     bad = set(updates) - set(_SUB2API_KEYS)
     if bad:
         raise HTTPException(status_code=400, detail="未知配置项: " + ", ".join(bad))
+    int_keys = {
+        "sub2api_group_id", "sub2api_sync_interval_sec",
+        "sub2api_target_available", "sub2api_max_register_batch",
+        "sub2api_pool_check_interval_sec",
+    }
+    bool_keys = {"sub2api_auto_sync"}
     for k, v in updates.items():
         if k == "sub2api_password":
             if not v or v == "********":
                 continue  # 不修改
             engine.config[k] = str(v)
-        elif k in ("sub2api_group_id", "sub2api_sync_interval_sec"):
+        elif k in int_keys:
             engine.config[k] = int(v)
-        elif k == "sub2api_auto_sync":
+        elif k in bool_keys:
             engine.config[k] = bool(v)
         else:
             engine.config[k] = str(v)
@@ -667,6 +866,16 @@ def sync_sub2api():
     return _sso_sync_once()
 
 
+@app.get("/api/sso/pool-status")
+def pool_status():
+    return _sub2api_pool_status()
+
+
+@app.post("/api/sso/pool-fill")
+def pool_fill():
+    return _sub2api_fill_once()
+
+
 # ---- 后台定时同步 ----
 _sync_thread: Optional[threading.Thread] = None
 
@@ -674,13 +883,19 @@ _sync_thread: Optional[threading.Thread] = None
 def _sub2api_sync_loop():
     while True:
         cfg = _sub2api_cfg()
-        time.sleep(max(300, cfg["interval"]))
-        if _sub2api_cfg()["auto_sync"]:
-            try:
+        interval = min(cfg["interval"], cfg["pool_check_interval"])
+        time.sleep(max(60, interval))
+        if not _sub2api_cfg()["auto_sync"]:
+            continue
+        try:
+            if _sub2api_cfg()["target_available"]:
+                res = _sub2api_fill_once()
+                _append_log("[*] sub2api 智能池维护: %s" % json.dumps(res, ensure_ascii=False))
+            else:
                 res = _sso_sync_once()
                 _append_log("[*] sub2api 定时同步完成: %s" % json.dumps(res, ensure_ascii=False))
-            except Exception as exc:  # noqa: BLE001
-                _append_log("[!] sub2api 定时同步异常: %s" % exc)
+        except Exception as exc:  # noqa: BLE001
+            _append_log("[!] sub2api 定时同步异常: %s" % exc)
 
 
 @app.on_event("startup")
