@@ -32,6 +32,21 @@ Grok Register 是一个面向自动化流程研究、测试环境验证和个人
 > [!IMPORTANT]
 > 本项目仅用于自动化流程研究、测试环境验证和个人学习。使用者应自行遵守目标网站服务条款、当地法律法规和第三方服务限制。请勿将本项目用于滥用、绕过平台限制或未经授权的商业用途。
 
+> [!TIP]
+> **一条命令从零部署**：
+>
+> ```powershell
+> # Windows PowerShell
+> powershell -ExecutionPolicy Bypass -Command "iex (irm https://raw.githubusercontent.com/quanshizuiliangdezai/zhuceji/main/install.ps1)"
+> ```
+>
+> ```bash
+> # Linux / macOS / Windows Git Bash
+> curl -fsSL https://raw.githubusercontent.com/quanshizuiliangdezai/zhuceji/main/install.sh | bash
+> ```
+>
+> 仓库已 clone 的情况下，在根目录执行 `bash deploy.sh` 或 `powershell -ExecutionPolicy Bypass -File deploy.ps1` 即可。详见 [DEPLOY.md](DEPLOY.md)。
+
 ## 目录
 
 - [项目功能](#项目功能)
