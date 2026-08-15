@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import ssl
 import subprocess
@@ -51,6 +52,7 @@ DEFAULTS = {
     "key_pass": "",         # 私钥密码（可选，通常留空）
     "password": "",         # 密码登录（password 模式走 plink -pw）
     "plink_path": "",       # plink 可执行路径（留空=自动探测：tools/plink.exe → PATH → 常见位置）
+    "hostkey": "",          # 服务器 SSH host key 指纹（plink -hostkey 用；首次连接自动获取）
     "local_port": 18080,    # 本机被转发的端口
     "remote_port": 18080,   # 服务器上暴露的端口
     "enabled": False,       # 是否已建立（仅作 UI 提示）
@@ -82,6 +84,11 @@ def read_cfg(root: Path) -> dict:
 
 def save_cfg(root: Path, data: dict) -> dict:
     cfg = dict(DEFAULTS)
+    # 保留旧配置中由运行时自动生成的字段（如 hostkey），避免前端表单未传时被清空
+    old = read_cfg(root)
+    for keep_key in ("hostkey",):
+        if old.get(keep_key):
+            cfg[keep_key] = old[keep_key]
     cfg.update({k: v for k, v in data.items() if k in DEFAULTS})
     for num_key in ("ssh_port", "local_port", "remote_port"):
         try:
@@ -246,12 +253,49 @@ def build_ssh_args(cfg: dict) -> list:
     return args
 
 
+def _plink_hostkey_arg(cfg: dict) -> list:
+    """返回 plink 的 -hostkey 参数片段；若配置中无指纹则返回空列表。"""
+    hk = str(cfg.get("hostkey", "")).strip()
+    if hk:
+        return ["-hostkey", hk]
+    return []
+
+
+def fetch_plink_hostkey(cfg: dict, plink: str) -> str:
+    """用 plink -batch 探测服务器 host key 指纹，失败时从 stderr 解析。
+
+    plink 在 batch 模式下遇到未知 host key 会拒绝，但会把指纹打印到 stderr。
+    成功则返回指纹字符串（如 'SHA256:xxxx'）；已缓存或无法解析返回空串。
+    """
+    server = str(cfg.get("server", "")).strip()
+    port = int(cfg.get("ssh_port", 22))
+    user = str(cfg.get("user", "root")).strip()
+    password = str(cfg.get("password", ""))
+    try:
+        out = _run([plink, "-batch", "-P", str(port), "-pw", password,
+                    "%s@%s" % (user, server), "echo", "ok"], timeout=15)
+        text = (out.stderr or out.stdout or "")
+    except Exception as exc:
+        text = str(exc)
+    marker = "key fingerprint is:"
+    idx = text.find(marker)
+    if idx != -1:
+        rest = text[idx + len(marker):]
+        for line in rest.splitlines():
+            line = line.strip()
+            if line.startswith("ssh-"):
+                parts = line.split()
+                if len(parts) >= 3:
+                    return parts[2].strip()
+    return ""
+
+
 def build_plink_args(cfg: dict) -> list:
     """plink 命令参数（含 -N -T）。密码通过 -pw 传入。
 
     注意：plink 没有 OpenSSH 的 -accept-new-host-keys / -keepalive 选项；
-    首次 host key 提示由启动器里的 `echo y |` 管道喂入 y 自动接受（测试时通过
-    子进程 stdin 喂 'y'）。重连由外层 while 循环负责。
+    为避免无 TTY 时卡 "Press Return to begin session"，必须加 -batch；
+    首次连接用 -hostkey 指定指纹即可跳过交互确认。指纹由面板在测试时自动获取保存。
     """
     port = int(cfg.get("ssh_port", 22))
     local = int(cfg.get("local_port", 18080))
@@ -260,8 +304,9 @@ def build_plink_args(cfg: dict) -> list:
     server = str(cfg.get("server", "")).strip()
     password = str(cfg.get("password", ""))
     args = [
-        "-N", "-T",
+        "-batch", "-N", "-T",
         "-P", str(port),
+    ] + _plink_hostkey_arg(cfg) + [
         "-R", "%d:127.0.0.1:%d" % (remote, local),
         "-pw", password,
         "%s@%s" % (user, server),
@@ -293,7 +338,9 @@ def build_plink_test_args(cfg: dict) -> list:
     server = str(cfg.get("server", "")).strip()
     password = str(cfg.get("password", ""))
     return [
+        "-batch",
         "-P", str(port),
+    ] + _plink_hostkey_arg(cfg) + [
         "-pw", password,
         "%s@%s" % (user, server),
     ]
@@ -313,63 +360,102 @@ def client_invocation(cfg: dict, root: Path):
 # 运行器脚本（带重连循环，实时读 tunnel.json）
 # ---------------------------------------------------------------------------
 def write_runner(root: Path) -> Path:
-    content = r"""# tunnel_run.ps1 - 由面板"隧道"tab 生成
-# 运行时不写死任何参数：每次循环都相对自身定位项目根并实时读取 tunnel.json
-$ErrorActionPreference = 'SilentlyContinue'
-$MyDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Root = $MyDir
+    content = r"""# tunnel_run.ps1 - 由面板"隧道"tab 自动生成（每次"建立隧道"会重写本文件）
+# 运行时不写死任何参数：每次循环都相对脚本自身定位项目根，并实时读取 tunnel.json
+# 注意：用 $PSScriptRoot 定位根目录最可靠；读文件异常会被显式记录，便于排错。
+# 诊断输出（最开头，确认脚本被拉起；即使后续崩溃也能留痕）
+$Diag = Join-Path $PSScriptRoot 'tunnel_run.diag.log'
+if (-not $Diag) { $Diag = 'tunnel_run.diag.log' }
+"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') DIAG started PID=$PID PSScriptRoot=$PSScriptRoot Args=$($args -join ' ')" | Out-File -Append -FilePath $Diag -Encoding utf8
+
+$ErrorActionPreference = 'Stop'
+
+$Root = $PSScriptRoot
+if (-not $Root) { $Root = Split-Path -Parent $MyInvocation.MyCommand.Path }
+"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') DIAG Root=$Root" | Out-File -Append -FilePath $Diag -Encoding utf8
 $PidFile = Join-Path $Root 'tunnel_run.pid'
 $Log = Join-Path $Root 'tunnel_run.log'
 $ssh = "C:\Windows\System32\OpenSSH\ssh.exe"
 if (-not (Test-Path $ssh)) { $ssh = "ssh" }
 
-function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File -Append -FilePath $Log }
+function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File -Append -FilePath $Log -Encoding utf8 }
 
 # 记录本启动器 PID（供面板停止时按树 kill）
 $Pid | Out-File -FilePath $PidFile -Force
+"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') DIAG pidfile written" | Out-File -Append -FilePath $Diag -Encoding utf8
+
+function Read-Config {
+    $jsonPath = Join-Path $Root 'tunnel.json'
+    if (-not (Test-Path $jsonPath)) {
+        Log "tunnel.json 不存在: $jsonPath"
+        return $null
+    }
+    try {
+        $raw = [System.IO.File]::ReadAllText($jsonPath)
+        if ($raw -eq $null -or $raw.Trim().Length -eq 0) {
+            Log "tunnel.json 为空: $jsonPath"
+            return $null
+        }
+        return ($raw | ConvertFrom-Json)
+    } catch {
+        Log ("读取/解析 tunnel.json 失败: " + $_.Exception.Message)
+        return $null
+    }
+}
 
 while ($true) {
-    if (-not (Test-Path (Join-Path $Root 'tunnel.json'))) {
-        Log "tunnel.json 缺失，10s 后重试"
-        Start-Sleep -Seconds 10
-        continue
-    }
-    try { $cfg = Get-Content (Join-Path $Root 'tunnel.json') -Raw | ConvertFrom-Json }
-    catch { Log "tunnel.json 解析失败，10s 后重试"; Start-Sleep -Seconds 10; continue }
-
-    $server = $cfg.server
-    $port = [int]($cfg.ssh_port)
-    $user = $cfg.user
-    $auth = $cfg.auth
-    $key = $cfg.key_path
-    $local = [int]($cfg.local_port)
-    $remote = [int]($cfg.remote_port)
-
-    if ($auth -eq 'password') {
-        $plink = $cfg.plink_path
-        if (-not $plink -or -not (Test-Path $plink)) { $plink = "plink" }
-        $pargs = @('-N','-T','-P',"$port",'-R',"$remote`:127.0.0.1:$local",
-                   '-pw',$cfg.password,"$user@$server")
-        Log "connecting (plink) $user@$server :$port  -R ${remote}:127.0.0.1:${local}"
-        # echo y 喂入首次 host key 确认（后台无 TTY 时靠管道 stdin）
-        echo y | & $plink @pargs
-        Log "tunnel exited, retry in 10s"
+    $cfg = Read-Config
+    if ($cfg -eq $null) {
         Start-Sleep -Seconds 10
         continue
     }
 
-    # 默认：OpenSSH 密钥免密
-    $args = @('-p', "$port", '-N', '-T',
-        '-o', 'StrictHostKeyChecking=accept-new',
-        '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
-        '-o', 'ExitOnForwardFailure=yes', '-o', 'ConnectTimeout=15')
-    if ($auth -eq 'key' -and $key) { $args += @('-i', $key) }
-    elseif ($auth -eq 'password') { $args += @('-o', 'PreferredAuthentications=password', '-o', 'PubkeyAuthentication=no') }
-    $args += @('-R', "$remote`:127.0.0.1:$local")
-    $args += @("$user@$server")
+    $server    = [string]$cfg.server
+    $port      = [int]$cfg.ssh_port
+    $user      = [string]$cfg.user
+    $auth      = [string]$cfg.auth
+    $key       = [string]$cfg.key_path
+    $local     = [int]$cfg.local_port
+    $remote    = [int]$cfg.remote_port
+    $hostkey   = [string]$cfg.hostkey
+    $password  = [string]$cfg.password
+    $plinkPath = [string]$cfg.plink_path
 
-    Log "connecting $user@$server :$port  -R ${remote}:127.0.0.1:${local}"
-    & $ssh @args
+    if ($port -le 0 -or $local -le 0 -or $remote -le 0 -or -not $server -or -not $user) {
+        Log ("配置非法，跳过本轮: server=[$server] port=[$port] user=[$user] local=[$local] remote=[$remote]")
+        Start-Sleep -Seconds 10
+        continue
+    }
+
+    try {
+        if ($auth -eq 'password') {
+            $plink = $plinkPath
+            if (-not $plink -or -not (Test-Path $plink)) {
+                # 优先回退到项目自带 tools/plink.exe，再退回 PATH 中的 plink
+                $cand = Join-Path $Root 'tools\plink.exe'
+                if (Test-Path $cand) { $plink = $cand } else { $plink = "plink" }
+            }
+            $pargs = @('-batch','-N','-T','-P',"$port")
+            if ($hostkey) { $pargs += @('-hostkey',$hostkey) }
+            $pargs += @('-R',"$remote`:127.0.0.1:$local",'-pw',$password,"$user@$server")
+            Log "connecting (plink) $user@$server :$port  -R ${remote}:127.0.0.1:${local}"
+            & $plink @pargs
+        } else {
+            # 默认：OpenSSH 密钥免密
+            $args = @('-p', "$port", '-N', '-T',
+                '-o', 'StrictHostKeyChecking=accept-new',
+                '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
+                '-o', 'ExitOnForwardFailure=yes', '-o', 'ConnectTimeout=15')
+            if ($auth -eq 'key' -and $key) { $args += @('-i', $key) }
+            elseif ($auth -eq 'password') { $args += @('-o', 'PreferredAuthentications=password', '-o', 'PubkeyAuthentication=no') }
+            $args += @('-R', "$remote`:127.0.0.1:$local")
+            $args += @("$user@$server")
+            Log "connecting $user@$server :$port  -R ${remote}:127.0.0.1:${local}"
+            & $ssh @args
+        }
+    } catch {
+        Log ("连接异常: " + $_.Exception.Message)
+    }
     Log "tunnel exited, retry in 10s"
     Start-Sleep -Seconds 10
 }
@@ -382,6 +468,27 @@ while ($true) {
 # ---------------------------------------------------------------------------
 # 进程状态（pidfile 优先，wmic 兜底；覆盖 ssh.exe 与 plink.exe）
 # ---------------------------------------------------------------------------
+def _pid_alive(pid: int) -> bool:
+    if not pid:
+        return False
+    try:
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        SYNCHRONIZE = 0x00100000
+        h = kernel.OpenProcess(SYNCHRONIZE, False, pid)
+        if h:
+            kernel.CloseHandle(h)
+            return True
+        return False
+    except Exception:
+        # fallback: 用 tasklist
+        try:
+            subprocess.check_output(["tasklist", "/FI", "PID eq %s" % pid], timeout=5)
+            return True
+        except Exception:
+            return False
+
+
 def _pidfile_alive(root: Path) -> int:
     pf = root / PIDFILE
     if not pf.is_file():
@@ -453,30 +560,86 @@ def start_tunnel(root: Path, cfg: dict) -> dict:
                     "message": "未检测到 plink，无法用密码建隧道。请先在隧道 tab 点「安装 plink」"}
     cfg["enabled"] = True
     save_cfg(root, cfg)
-    runner = write_runner(root)
-    ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    # 清理旧 pidfile，避免状态误判
+    pf = root / PIDFILE
+    if pf.is_file():
+        try:
+            pf.unlink()
+        except Exception:
+            pass
+    # 诊断日志：捕获 runner 子进程 stdout/stderr
+    diag_out = root / "tunnel_run.diag.log"
+    diag_err = root / "tunnel_run.diag.err"
     try:
-        subprocess.Popen(
-            [ps, "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy",
-             "Bypass", "-File", str(runner).replace("/", "\\")],
+        diag_out.write_text("", encoding="utf-8")
+        diag_err.write_text("", encoding="utf-8")
+    except Exception:
+        pass
+
+    # 优先使用 Python tunnel runner，比 PowerShell 更稳定（避免 PSScriptRoot/ExecutionPolicy 问题）
+    py_runner = root / "scripts" / "tunnel_runner.py"
+    python_exe = root / ".venv" / "Scripts" / "pythonw.exe"
+    if not python_exe.is_file():
+        python_exe = root / ".venv" / "Scripts" / "python.exe"
+    if not python_exe.is_file():
+        python_exe = Path(sys.executable)
+    runner_cmd = [str(python_exe), str(py_runner)]
+    use_python_runner = py_runner.is_file()
+
+    if not use_python_runner:
+        # fallback: 旧的 PowerShell runner
+        runner = write_runner(root)
+        ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        if not Path(ps).exists():
+            ps = os.path.expandvars(r"%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe")
+        runner_cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner).replace("/", "\\")]
+
+    popen_pid = 0
+    try:
+        out_f = open(str(diag_out), "wb")
+        err_f = open(str(diag_err), "wb")
+        # 隐藏 Windows 控制台黑框；pythonw.exe 本身无窗口；额外加 CREATE_NO_WINDOW 保险
+        creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                         | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        proc = subprocess.Popen(
+            runner_cmd,
             cwd=str(root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=out_f,
+            stderr=err_f,
             close_fds=True,
-            creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                           | getattr(subprocess, "DETACHED_PROCESS", 0)),
+            creationflags=creationflags,
         )
+        popen_pid = proc.pid
     except Exception as exc:
         return {"ok": False, "message": "启动隧道失败: %s" % exc}
-    time.sleep(1.5)
-    st = tunnel_status(root)
-    if st["running"]:
-        return {"ok": True, "message": "隧道已建立（带重连），本机 %d → 服务器 %d（%s）"
-                % (int(cfg["local_port"]), int(cfg["remote_port"]),
-                   "plink 密码" if cfg.get("auth") == "password" else "密钥免密"),
-                "running": True, "pid": st["pid"]}
-    return {"ok": True, "message": "已尝试启动隧道（pidfile 尚未就绪，请稍后刷新状态）",
-            "running": False}
+    # 给 runner 留足写 pidfile 的时间；同时轮询避免无限 sleep
+    alive_after = 0
+    for _ in range(10):
+        time.sleep(0.5)
+        if alive_after == 0 and popen_pid and _pid_alive(popen_pid):
+            alive_after = 1
+        st = tunnel_status(root)
+        if st["running"]:
+            return {"ok": True, "message": "隧道已建立（带重连），本机 %d → 服务器 %d（%s）"
+                    % (int(cfg["local_port"]), int(cfg["remote_port"]),
+                       "plink 密码" if cfg.get("auth") == "password" else "密钥免密"),
+                    "running": True, "pid": st["pid"]}
+    # 未就绪：收集诊断信息返回给调用方
+    diag = ""
+    try:
+        if diag_out.is_file():
+            diag = diag_out.read_text(encoding="utf-8", errors="replace").strip()
+    except Exception:
+        pass
+    if not diag:
+        try:
+            if diag_err.is_file():
+                diag = diag_err.read_text(encoding="utf-8", errors="replace").strip()
+        except Exception:
+            pass
+    return {"ok": False, "message": "隧道未建立：runner 未就绪 (popen_pid=%s, alive=%s, cmd=%s)。诊断日志：%s"
+            % (popen_pid, alive_after, " ".join(runner_cmd), diag or "空"),
+            "running": False, "popen_pid": popen_pid, "diag": diag, "cmd": " ".join(runner_cmd)}
 
 
 def stop_tunnel(root: Path) -> dict:
@@ -516,15 +679,29 @@ def test_ssh_reachable(cfg: dict, root: Path) -> dict:
         exe, base, is_plink = client_invocation(cfg, root)
     except Exception as exc:
         return {"ok": False, "reachable": False, "message": str(exc)}
-    # plink 首次未知 host key 需从 stdin 喂 'y' 接受
-    inp = "y\n" if is_plink else None
+
+    # plink 无 TTY 时必须用 -hostkey + -batch；若配置里没有指纹，自动探测一次并保存
+    if is_plink and not str(cfg.get("hostkey", "")).strip():
+        hk = fetch_plink_hostkey(cfg, exe)
+        if hk:
+            cfg["hostkey"] = hk
+            save_cfg(root, cfg)
+            # 重新生成含 -hostkey 的参数
+            base = build_plink_test_args(cfg)
+        else:
+            return {"ok": False, "reachable": False,
+                    "message": "无法获取服务器 host key 指纹；请检查地址/端口/密码是否正确"}
+
     try:
-        out = _run([exe] + base + ["echo", "tunnel_ok"], timeout=30, input_text=inp)
+        out = _run([exe] + base + ["echo", "tunnel_ok"], timeout=30)
     except Exception as exc:
         return {"ok": False, "reachable": False, "message": "SSH 连接异常: %s" % exc}
     if out.returncode == 0 and "tunnel_ok" in out.stdout:
         return {"ok": True, "reachable": True, "message": "SSH 可达且认证通过"}
     err = (out.stderr or out.stdout).strip()
+    if "host key" in err.lower() and "not cached" in err.lower():
+        return {"ok": False, "reachable": False,
+                "message": "服务器 host key 未缓存或已变更；请重新点「测试」自动获取新指纹"}
     if "Permission denied" in err:
         return {"ok": False, "reachable": False,
                 "message": "认证失败（密钥/密码不对或公钥未装到服务器）"}
@@ -565,7 +742,7 @@ def test_forward(root: Path, cfg: dict) -> dict:
 
     try:
         remote_cmd = (
-            "curl -s -o /dev/null -w 'HTTP_%{http_code}' -m 8 http://127.0.0.1:%d/ "
+            "curl -s -o /dev/null -w 'HTTP_%%{http_code}' -m 8 http://127.0.0.1:%d/ "
             "|| python3 -c \"import urllib.request;print('HTTP_'+str(urllib.request.urlopen('http://127.0.0.1:%d/',timeout=8).status))\" 2>/dev/null"
             % (remote, remote)
         )
@@ -573,9 +750,9 @@ def test_forward(root: Path, cfg: dict) -> dict:
             exe, base, is_plink = client_invocation(cfg, root)
         except Exception as exc:
             return {"ok": False, "message": str(exc)}
-        inp = "y\n" if is_plink else None
+        # plink 已在 build_plink_test_args 里用 -batch/-hostkey 处理无 TTY 场景
         try:
-            out = _run([exe] + base + [remote_cmd], timeout=35, cwd=str(root), input_text=inp)
+            out = _run([exe] + base + [remote_cmd], timeout=35, cwd=str(root))
         except Exception as exc:
             return {"ok": False, "message": "服务器侧测试异常: %s" % exc}
         resp = out.stdout.strip()
@@ -637,10 +814,10 @@ def install_autostart(root: Path, cfg: dict) -> dict:
     if cfg.get("auth") == "password" and not find_plink(cfg, root):
         return {"ok": False, "message": "未检测到 plink，无法设置密码模式开机自启，请先安装 plink"}
     save_cfg(root, {**read_cfg(root), **cfg, "enabled": True})
-    runner = write_runner(root)
+    launcher = _write_autostart_launcher(root)
     if sys.platform == "win32":
-        return _install_windows(runner)
-    return _install_posix(runner)
+        return _install_windows(launcher)
+    return _install_posix(launcher)
 
 
 def remove_autostart() -> dict:
@@ -660,19 +837,58 @@ def _task_exists() -> bool:
         return False
 
 
-def _install_windows(runner: Path) -> dict:
-    ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-    tr = '"{ps}" -WindowStyle Hidden -ExecutionPolicy Bypass -File "{file}"'.format(
-        ps=ps, file=str(runner).replace("/", "\\")
+def _write_autostart_launcher(root: Path) -> Path:
+    """生成无窗口自启启动器（Windows 用 VBS，POSIX 用 shell 脚本）。"""
+    is_win = sys.platform == "win32"
+    runner = root / "scripts" / "tunnel_runner.py"
+    if is_win:
+        pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
+        if not pythonw.is_file():
+            pythonw = root / ".venv" / "Scripts" / "python.exe"
+        if not pythonw.is_file():
+            pythonw = Path(sys.executable)
+        # VBS：0=Hidden, False=不等待，确保无黑框且任务计划立即返回
+        vbs = (
+            'Set WshShell = CreateObject("WScript.Shell")\n'
+            'WshShell.Run "\"{py}\" \"{script}\"", 0, False\n'
+        ).format(
+            py=str(pythonw).replace("\\", "\\\\").replace('"', '\\"'),
+            script=str(runner).replace("\\", "\\\\").replace('"', '\\"'),
+        )
+        launcher = root / "autostart_tunnel.vbs"
+        launcher.write_text(vbs, encoding="utf-8")
+    else:
+        venv_py = root / ".venv" / "bin" / "python"
+        python = venv_py if venv_py.is_file() else Path(sys.executable)
+        sh = "#!/usr/bin/env bash\n"
+        sh += "nohup {py} {script} >/dev/null 2>&1 &\n".format(
+            py=shlex.quote(str(python)),
+            script=shlex.quote(str(runner)),
+        )
+        launcher = root / "autostart_tunnel.sh"
+        launcher.write_text(sh, encoding="utf-8")
+        try:
+            os.chmod(launcher, 0o755)
+        except Exception:
+            pass
+    return launcher
+
+
+def _install_windows(launcher: Path) -> dict:
+    wscript = os.path.expandvars(r"%SystemRoot%\System32\wscript.exe")
+    if not Path(wscript).is_file():
+        wscript = r"C:\Windows\System32\wscript.exe"
+    tr = '"{wscript}" "{file}"'.format(
+        wscript=str(wscript).replace("/", "\\"),
+        file=str(launcher).replace("/", "\\")
     )
-    # 以当前登录用户身份运行（无需管理员），/RL HIGHEST 提升权利但不强制提权
     out = _run(["schtasks", "/Create", "/TN", TUNNEL_TASK, "/SC", "ONLOGON",
                 "/TR", tr, "/F"], timeout=60)
     if out.returncode != 0:
         return {"ok": False, "message": "创建任务计划失败",
                 "stderr": (out.stderr or out.stdout).strip()}
     return {"ok": True, "message": "已设置开机自启（登录时后台建立隧道，带重连）",
-            "launcher": str(runner)}
+            "launcher": str(launcher)}
 
 
 def _remove_windows() -> dict:

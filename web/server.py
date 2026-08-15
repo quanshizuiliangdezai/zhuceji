@@ -269,9 +269,12 @@ def put_tunnel_config(payload: dict):
 def start_tunnel():
     from web import tunnel_helper as th
     cfg = th.read_cfg(ROOT)
+    _append_log("[*] 收到建立隧道请求: %s@%s:%s" % (cfg.get("user"), cfg.get("server"), cfg.get("ssh_port")))
     try:
         result = th.start_tunnel(ROOT, cfg)
+        _append_log("[*] 建立隧道结果: %s" % json.dumps(result, ensure_ascii=False))
     except Exception as exc:
+        _append_log("[!] 建立隧道失败: %s" % exc)
         raise HTTPException(status_code=500, detail="建立隧道失败: %s" % exc) from exc
     return result
 
@@ -279,9 +282,12 @@ def start_tunnel():
 @app.post("/api/tunnel/stop")
 def stop_tunnel():
     from web import tunnel_helper as th
+    _append_log("[*] 收到停止隧道请求")
     try:
         result = th.stop_tunnel(ROOT)
+        _append_log("[*] 停止隧道结果: %s" % json.dumps(result, ensure_ascii=False))
     except Exception as exc:
+        _append_log("[!] 停止隧道失败: %s" % exc)
         raise HTTPException(status_code=500, detail="停止隧道失败: %s" % exc) from exc
     return result
 
@@ -296,9 +302,12 @@ def tunnel_status_api():
 def test_tunnel():
     from web import tunnel_helper as th
     cfg = th.read_cfg(ROOT)
+    _append_log("[*] 收到隧道连通性测试: %s@%s:%s" % (cfg.get("user"), cfg.get("server"), cfg.get("ssh_port")))
     try:
         result = th.test_tunnel(ROOT, cfg)
+        _append_log("[*] 隧道测试结果: %s" % json.dumps(result, ensure_ascii=False))
     except Exception as exc:
+        _append_log("[!] 隧道测试失败: %s" % exc)
         raise HTTPException(status_code=500, detail="隧道测试失败: %s" % exc) from exc
     return result
 
@@ -313,20 +322,29 @@ def get_tunnel_autostart():
 def install_tunnel_autostart():
     from web import tunnel_helper as th
     cfg = th.read_cfg(ROOT)
+    _append_log("[*] 收到设置隧道开机自启请求: %s@%s:%s" % (cfg.get("user"), cfg.get("server"), cfg.get("ssh_port")))
     try:
         result = th.install_autostart(ROOT, cfg)
     except Exception as exc:
+        _append_log("[!] 设置隧道开机自启失败: %s" % exc)
         raise HTTPException(status_code=500, detail="设置隧道开机自启失败: %s" % exc) from exc
+    if result.get("ok"):
+        _append_log("[*] %s" % result.get("message"))
+    else:
+        _append_log("[!] 设置隧道开机自启失败: %s" % result.get("message"))
     return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
 
 
 @app.post("/api/tunnel/autostart/remove")
 def remove_tunnel_autostart():
     from web import tunnel_helper as th
+    _append_log("[*] 收到取消隧道开机自启请求")
     try:
         result = th.remove_autostart()
     except Exception as exc:
+        _append_log("[!] 取消隧道开机自启失败: %s" % exc)
         raise HTTPException(status_code=500, detail="取消隧道开机自启失败: %s" % exc) from exc
+    _append_log("[*] %s" % result.get("message"))
     return {"ok": result.get("ok", False), "message": result.get("message", ""), "detail": result}
 
 
@@ -711,7 +729,7 @@ def main() -> None:
 _SUB2API_KEYS = (
     "sub2api_base_url", "sub2api_email", "sub2api_password",
     "sub2api_group_id", "sub2api_auto_sync", "sub2api_sync_interval_sec",
-    "sub2api_proxy_key", "sub2api_grok_model",
+    "sub2api_proxy_key", "sub2api_proxy_id", "sub2api_grok_model",
     "sub2api_target_available", "sub2api_max_register_batch",
     "sub2api_pool_check_interval_sec", "sub2api_account_concurrency",
 )
@@ -728,6 +746,7 @@ def _sub2api_cfg() -> dict:
         "auto_sync": bool(c.get("sub2api_auto_sync", False)),
         "interval": int(c.get("sub2api_sync_interval_sec") or 3600),
         "proxy_key": (c.get("sub2api_proxy_key") or _SUB2API_DEFAULT_PROXY_KEY).strip(),
+        "proxy_id": int(c.get("sub2api_proxy_id") or 0),
         "model": (c.get("sub2api_grok_model") or "grok-4.6").strip(),
         "target_available": int(c.get("sub2api_target_available") or 0),
         "max_register_batch": max(1, int(c.get("sub2api_max_register_batch") or 5)),
@@ -760,13 +779,26 @@ def _sub2api_login(cfg: dict) -> str:
 
 
 def _sub2api_list_grok(token: str, base: str) -> list:
-    s, b = _http_json("GET", base + "/api/v1/admin/accounts?platform=grok", token=token)
-    if s != 200:
-        raise RuntimeError("列出 grok 账号失败 HTTP %s: %s" % (s, b[:160]))
-    return json.loads(b).get("data", {}).get("items", [])
+    # 必须翻页拉全，否则只拿到默认前 20 条，导致后续账号匹配不到被反复当作新账号导入（重复雪球）
+    items = []
+    page, page_size = 1, 200
+    while True:
+        url = base + "/api/v1/admin/accounts?platform=grok&page=%d&page_size=%d" % (page, page_size)
+        s, b = _http_json("GET", url, token=token)
+        if s != 200:
+            raise RuntimeError("列出 grok 账号失败 HTTP %s: %s" % (s, b[:160]))
+        data = json.loads(b).get("data", {})
+        chunk = data.get("items", [])
+        items.extend(chunk)
+        total = data.get("total")
+        if not chunk or (total is not None and len(items) >= total) or len(chunk) < page_size:
+            break
+        page += 1
+    return items
 
 
-def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model: str = "grok-4.6", concurrency: int = 1):
+def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str,
+                        proxy_id: int = 0, model: str = "grok-4.6", concurrency: int = 1):
     creds = {"access_token": acc["access_token"], "base_url": acc["base_url"] or GROK_SUBSCRIPTION_PROXY}
     if acc.get("refresh_token"):
         creds["refresh_token"] = acc["refresh_token"]
@@ -775,7 +807,7 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model:
     if acc.get("expired"):
         creds["expires_at"] = acc["expired"]
     creds["model_mapping"] = {model: model}
-    payload = {"accounts": [{
+    account_payload = {
         "name": acc["email"] or acc["file"],
         "notes": "grok-register SSO token",
         "platform": "grok", "type": "oauth",
@@ -783,7 +815,10 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model:
         "proxy_key": proxy_key,
         "concurrency": max(1, int(concurrency or 1)), "priority": 1, "rate_multiplier": 1,
         "auto_pause_on_expired": True,
-    }]}
+    }
+    if proxy_id:
+        account_payload["proxy_id"] = int(proxy_id)
+    payload = {"accounts": [account_payload]}
     s, b = _http_json("POST", base + "/api/v1/admin/accounts/batch", token=token, body=payload)
     if s != 200:
         raise RuntimeError("导入账号失败 HTTP %s: %s" % (s, b[:160]))
@@ -793,9 +828,12 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str, model:
     return None
 
 
-def _sub2api_link_group(acc_id, group_id, base: str, token: str):
+def _sub2api_update_account(acc_id, group_id, base: str, token: str, proxy_id: int = 0):
+    body = {"group_ids": [int(group_id)]}
+    if proxy_id:
+        body["proxy_id"] = int(proxy_id)
     _http_json("PUT", base + "/api/v1/admin/accounts/%d" % int(acc_id),
-               token=token, body={"group_ids": [int(group_id)]})
+               token=token, body=body)
 
 
 def _sub2api_set_model(acc_id, model: str, base: str, token: str):
@@ -825,17 +863,20 @@ def _sso_sync_once() -> dict:
             matched = remote_by_name.get(name)
             if matched:
                 for a in matched:
-                    _sub2api_link_group(a["id"], cfg["group_id"], cfg["base_url"], token)
+                    _sub2api_update_account(a["id"], cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"])
                     linked += 1
                     # 已存在但缺模型的，自动补上（合并 PUT，不动 token）
                     if not (a.get("credentials") or {}).get("model_mapping"):
                         _sub2api_set_model(a["id"], cfg["model"], cfg["base_url"], token)
                         modeled += 1
             else:
-                new_id = _sub2api_import_one(acc, cfg["base_url"], token, cfg["proxy_key"], cfg["model"], cfg.get("concurrency", 1))
+                new_id = _sub2api_import_one(acc, cfg["base_url"], token, cfg["proxy_key"],
+                                             cfg["proxy_id"], cfg["model"], cfg.get("concurrency", 1))
                 if new_id:
-                    _sub2api_link_group(new_id, cfg["group_id"], cfg["base_url"], token)
+                    _sub2api_update_account(new_id, cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"])
                     added += 1
+                    # 回填匹配表，防止 local 万一有重复 email 时本轮后续再次新建
+                    remote_by_name.setdefault(name, []).append({"id": new_id})
         deleted = 0
         now = _utc_now()
         for a in remote:
@@ -1012,6 +1053,7 @@ def _sub2api_discover(base_url: str, email: str, password: str) -> dict:
     pref = [p for p in active_proxies if p.get("host") == "127.0.0.1" and str(p.get("port")) == "10808"]
     suggested_proxy = pref[0] if pref else (active_proxies[0] if active_proxies else None)
     proxy_key = _proxy_key_from_proxy(suggested_proxy) if suggested_proxy else _SUB2API_DEFAULT_PROXY_KEY
+    proxy_id = suggested_proxy.get("id") if suggested_proxy else None
 
     models = []
     if group_id:
@@ -1036,6 +1078,7 @@ def _sub2api_discover(base_url: str, email: str, password: str) -> dict:
         "models": models,
         "suggested": {
             "group_id": group_id,
+            "proxy_id": proxy_id,
             "proxy_key": proxy_key,
             "model": model,
         },
@@ -1069,6 +1112,7 @@ def get_sub2api_config():
         "sub2api_email": c.get("sub2api_email", ""),
         "sub2api_group_id": int(c.get("sub2api_group_id") or 8),
         "sub2api_proxy_key": c.get("sub2api_proxy_key", _SUB2API_DEFAULT_PROXY_KEY),
+        "sub2api_proxy_id": int(c.get("sub2api_proxy_id") or 0),
         "sub2api_grok_model": c.get("sub2api_grok_model", "grok-4.6"),
         "sub2api_auto_sync": bool(c.get("sub2api_auto_sync", False)),
         "sub2api_sync_interval_sec": int(c.get("sub2api_sync_interval_sec") or 3600),
@@ -1090,6 +1134,7 @@ async def put_sub2api_config(request: Request):
         "sub2api_group_id", "sub2api_sync_interval_sec",
         "sub2api_target_available", "sub2api_max_register_batch",
         "sub2api_pool_check_interval_sec", "sub2api_account_concurrency",
+        "sub2api_proxy_id",
     }
     bool_keys = {"sub2api_auto_sync"}
     for k, v in updates.items():

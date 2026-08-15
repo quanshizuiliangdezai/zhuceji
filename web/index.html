@@ -231,6 +231,7 @@ function renderFields() {
         + '<label class="sso-field"><span>管理员密码</span><input id="sub2apiPassword" type="password" placeholder="留空=不修改"></label>'
         + '<label class="sso-field"><span>目标账号池 ID (grok)</span><select id="sub2apiGroupId"><option value="8">#8 cs2 (grok)</option></select></label>'
         + '<label class="sso-field"><span>代理 Key (可选)</span><select id="sub2apiProxyKey"><option value="http|127.0.0.1|10808||">#2 local-10808 [active]</option></select></label>'
+        + '<input type="hidden" id="sub2apiProxyId" value="0">'
         + '<label class="sso-field"><span>grok 模型 (自动填)</span><select id="sub2apiGrokModel"><option value="grok-4.6">grok-4.6</option></select></label>'
         + '<label class="sso-field"><span>账号并发数</span><input id="sub2apiAccountConcurrency" type="number" value="1" min="1" max="100"></label>'
         + '<label class="sso-field"><span>同步间隔 (秒)</span><input id="sub2apiInterval" type="number" value="3600"></label>'
@@ -439,12 +440,26 @@ function _setSelect(id, options, selectedValue, placeholder) {
   }
 }
 
+function _proxyKeyFromProxy(p) {
+  return (p.protocol || 'http') + '|' + (p.host || '') + '|' + (p.port || '') + '|' + (p.username || '') + '|' + (p.password || '');
+}
+
+function _syncProxyIdFromSelect(savedId) {
+  const sel = $('sub2apiProxyKey');
+  const hidden = $('sub2apiProxyId');
+  if (!sel || !hidden) return;
+  const key = sel.value;
+  const p = (_sub2apiOptions.proxies || []).find(x => _proxyKeyFromProxy(x) === key);
+  hidden.value = p && p.id != null ? p.id : (savedId || '');
+}
+
 function populateSub2apiSelects(groups, proxies, models, selected) {
   _sub2apiOptions = { groups: groups || [], proxies: proxies || [], models: models || [] };
   const s = selected || {};
   _setSelect('sub2apiGroupId', _buildSelectOptions(groups, 'group'), s.group_id, lang === 'zh' ? '请选择账号池' : 'Select group');
   _setSelect('sub2apiProxyKey', _buildSelectOptions(proxies, 'proxy'), s.proxy_key, lang === 'zh' ? '请选择代理' : 'Select proxy');
   _setSelect('sub2apiGrokModel', _buildSelectOptions(models, 'model'), s.model, lang === 'zh' ? '请选择模型' : 'Select model');
+  _syncProxyIdFromSelect(s.proxy_id);
 }
 
 function loadSub2apiConfig() {
@@ -459,20 +474,22 @@ function loadSub2apiConfig() {
     $('sub2apiPoolInterval').value = c.sub2api_pool_check_interval_sec || 300;
     $('sub2apiAccountConcurrency').value = c.sub2api_account_concurrency || 1;
     $('sub2apiAutoSync').checked = !!c.sub2api_auto_sync;
+    $('sub2apiProxyId').value = c.sub2api_proxy_id || '';
     // 如果已配置地址和邮箱，自动拉取一次可选列表，把 group/proxy/model 变成下拉框
     if (c.sub2api_base_url && c.sub2api_email) {
-      autoDiscoverSub2api(c.sub2api_group_id, c.sub2api_proxy_key, c.sub2api_grok_model);
+      autoDiscoverSub2api(c.sub2api_group_id, c.sub2api_proxy_id, c.sub2api_proxy_key, c.sub2api_grok_model);
     } else {
       // 没有可选项时，至少把已保存值填进去
       _setSelect('sub2apiGroupId', [], c.sub2api_group_id || 8);
       _setSelect('sub2apiProxyKey', [], c.sub2api_proxy_key || 'http|127.0.0.1|10808||');
       _setSelect('sub2apiGrokModel', [], c.sub2api_grok_model || 'grok-4.6');
+      _syncProxyIdFromSelect(c.sub2api_proxy_id);
     }
     loadPoolStatus();
   }).catch(() => {});
 }
 
-async function autoDiscoverSub2api(savedGroup, savedProxy, savedModel) {
+async function autoDiscoverSub2api(savedGroup, savedProxyId, savedProxy, savedModel) {
   const base = $('sub2apiBaseUrl').value.trim();
   const email = $('sub2apiEmail').value.trim();
   if (!base || !email) return;
@@ -486,6 +503,7 @@ async function autoDiscoverSub2api(savedGroup, savedProxy, savedModel) {
       const s = d.suggested || {};
       populateSub2apiSelects(d.groups, d.proxies, d.models, {
         group_id: savedGroup != null ? savedGroup : s.group_id,
+        proxy_id: savedProxyId != null ? savedProxyId : s.proxy_id,
         proxy_key: savedProxy || s.proxy_key,
         model: savedModel || s.model
       });
@@ -508,6 +526,7 @@ function saveSub2apiConfig() {
     sub2api_password: $('sub2apiPassword').value,
     sub2api_group_id: Number($('sub2apiGroupId').value) || 8,
     sub2api_proxy_key: $('sub2apiProxyKey').value.trim(),
+    sub2api_proxy_id: Number($('sub2apiProxyId').value) || 0,
     sub2api_grok_model: $('sub2apiGrokModel').value.trim() || 'grok-4.6',
     sub2api_sync_interval_sec: Number($('sub2apiInterval').value) || 3600,
     sub2api_target_available: Math.max(0, Number($('sub2apiTargetAvailable').value) || 0),
@@ -571,10 +590,12 @@ function discoverSub2api(silent) {
     if (d.ok) {
       const s = d.suggested || {};
       const currentGroup = $('sub2apiGroupId').value;
+      const currentProxyId = $('sub2apiProxyId').value;
       const currentProxy = $('sub2apiProxyKey').value;
       const currentModel = $('sub2apiGrokModel').value;
       populateSub2apiSelects(d.groups, d.proxies, d.models, {
         group_id: currentGroup || s.group_id,
+        proxy_id: currentProxyId || s.proxy_id,
         proxy_key: currentProxy || s.proxy_key,
         model: currentModel || s.model
       });
@@ -660,6 +681,8 @@ function bindSub2api() {
   const save = $('sub2apiSaveBtn'); if (save) save.onclick = saveSub2apiConfig;
   const sync = $('sub2apiSyncBtn'); if (sync) sync.onclick = syncSub2api;
   const fill = $('sub2apiFillBtn'); if (fill) fill.onclick = fillPool;
+  const proxySel = $('sub2apiProxyKey');
+  if (proxySel) proxySel.onchange = () => _syncProxyIdFromSelect();
 }
 
 function bindTunnel() {
@@ -739,25 +762,48 @@ async function saveTunnelConfig() {
   } catch (e) { setNotice('保存失败: ' + e.message, true); }
 }
 
+function _tunnelLog(line) {
+  const t = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  appendLine({ line: '[' + t + '] ' + line });
+}
+
 async function buildTunnel() {
   const cfg = _tunnelCfgFromForm();
   await saveTunnelConfig();
+  _tunnelLog('[*] 隧道：正在请求建立 ' + cfg.user + '@' + cfg.server + ':' + cfg.ssh_port);
   try {
     const r = await fetch('/api/tunnel/start', { method: 'POST' });
     const d = await r.json();
-    if (!d.ok) { setNotice('建立失败: ' + (d.message || d.detail || ''), true); return; }
+    if (!d.ok) {
+      const msg = '建立失败: ' + (d.message || d.detail || '');
+      setNotice(msg, true);
+      _tunnelLog('[!] 隧道：' + msg);
+      if (d.diag) {
+        _tunnelLog('[!] 隧道诊断日志：' + d.diag.replace(/\n/g, ' | '));
+      }
+      return;
+    }
     setNotice(tt('buildOk') + ' ✓', false);
+    _tunnelLog('[+] 隧道：' + (d.message || '已发送建立请求'));
     loadTunnelConfig();
-  } catch (e) { setNotice('建立失败: ' + e.message, true); }
+  } catch (e) {
+    setNotice('建立失败: ' + e.message, true);
+    _tunnelLog('[!] 隧道：建立失败 - ' + e.message);
+  }
 }
 
 async function stopTunnel() {
+  _tunnelLog('[*] 隧道：正在请求停止');
   try {
     const r = await fetch('/api/tunnel/stop', { method: 'POST' });
     const d = await r.json();
     setNotice('已停止隧道', false);
+    _tunnelLog('[+] 隧道：' + (d.message || '已停止'));
     loadTunnelConfig();
-  } catch (e) { setNotice('停止失败: ' + e.message, true); }
+  } catch (e) {
+    setNotice('停止失败: ' + e.message, true);
+    _tunnelLog('[!] 隧道：停止失败 - ' + e.message);
+  }
 }
 
 async function testTunnel() {
@@ -765,33 +811,49 @@ async function testTunnel() {
   const res = $('tunnelResult');
   res.className = 'tunnel-result';
   res.innerHTML = '<div class="tunnel-test-line">⏳ 测试中...</div>';
+  _tunnelLog('[*] 隧道：正在测试连通性...');
   try {
     const r = await fetch('/api/tunnel/test', { method: 'POST' });
     const d = await r.json();
     let html = '';
     if (d.steps && d.steps.length) {
-      html += d.steps.map(s => '<div class="tunnel-test-line ' + (s.ok ? 'ok' : 'bad') + '">'
-        + (s.ok ? '✓' : '✗') + ' ' + s.name + '：' + (s.message || '') + '</div>').join('');
+      html += d.steps.map(s => {
+        _tunnelLog((s.ok ? '[+] ' : '[!] ') + s.name + '：' + (s.message || ''));
+        return '<div class="tunnel-test-line ' + (s.ok ? 'ok' : 'bad') + '">'
+          + (s.ok ? '✓' : '✗') + ' ' + s.name + '：' + (s.message || '') + '</div>';
+      }).join('');
     }
     html += '<div class="tunnel-test-line ' + (d.ok ? 'ok' : 'bad') + '">'
       + (d.ok ? '✓ ' : '✗ ') + (d.message || '') + '</div>';
     res.innerHTML = html;
     res.classList.add(d.ok ? 'ok' : 'bad');
+    _tunnelLog((d.ok ? '[+] ' : '[!] ') + '隧道测试：' + (d.message || ''));
   } catch (e) {
     res.innerHTML = '<div class="tunnel-test-line bad">✗ ' + e.message + '</div>';
     res.classList.add('bad');
+    _tunnelLog('[!] 隧道测试异常 - ' + e.message);
   }
 }
 
 async function setTunnelAutostart(on) {
   const url = on ? '/api/tunnel/autostart/install' : '/api/tunnel/autostart/remove';
+  _tunnelLog((on ? '[*] 正在设置隧道开机自启…' : '[*] 正在取消隧道开机自启…'));
   try {
     const r = await fetch(url, { method: 'POST' });
     const d = await r.json();
-    if (!d.ok) { setNotice((on ? '设置' : '取消') + '开机自启失败: ' + (d.message || d.detail || ''), true); return; }
+    if (!d.ok) {
+      const msg = (on ? '设置' : '取消') + '开机自启失败: ' + (d.message || d.detail || '');
+      _tunnelLog('[!] ' + msg);
+      setNotice(msg, true);
+      return;
+    }
+    _tunnelLog('[*] ' + (d.message || (on ? '已设置开机自启' : '已取消开机自启')));
     setNotice(d.message || (on ? tt('autostartOn') : tt('autostartOff')), false);
     loadTunnelConfig();
-  } catch (e) { setNotice('操作失败: ' + e.message, true); }
+  } catch (e) {
+    _tunnelLog('[!] 操作失败: ' + e.message);
+    setNotice('操作失败: ' + e.message, true);
+  }
 }
 
 function toggleTunnelPlinkBox() {
