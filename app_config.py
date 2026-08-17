@@ -47,7 +47,8 @@ DEFAULT_CONFIG = {
     "sso_risk_rejected_file": "./sso_risk_rejected.txt",
     "register_count": 1,
     "multi_thread_enabled": False,
-    "multi_thread_workers": 4,
+    "multi_thread_workers": 2,
+    "account_gap_sec": 8,
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
     "grok2api_auto_add_local": False,
     "grok2api_local_token_file": "",
@@ -146,6 +147,7 @@ def validate_config_structure(raw):
         cfg[key] = _require_bool(cfg, key)
     cfg["register_count"] = _require_int(cfg, "register_count", 1, 2500)
     cfg["multi_thread_workers"] = _require_int(cfg, "multi_thread_workers", 1, 8)
+    cfg["account_gap_sec"] = _require_int(cfg, "account_gap_sec", 0, 300)
     cfg["proxy_pool_refresh_interval_sec"] = _require_int(cfg, "proxy_pool_refresh_interval_sec", 0, 86400)
     cfg["proxy_pool_probe_interval_sec"] = _require_int(cfg, "proxy_pool_probe_interval_sec", 0, 86400)
     cfg["proxy_pool_probe_timeout_sec"] = _require_int(cfg, "proxy_pool_probe_timeout_sec", 3, 120)

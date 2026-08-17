@@ -648,7 +648,8 @@ def run_registration_common(count, log_callback, cancel_callback, accounts_outpu
     from registration_flow import RegistrationCallbacks, RegistrationOperations, run_batch
     callbacks = RegistrationCallbacks(log=log_callback, cancelled=cancel_callback)
     parallel_enabled = bool(config.get("multi_thread_enabled", False))
-    parallel_workers = int(config.get("multi_thread_workers", 4) or 4)
+    parallel_workers = int(config.get("multi_thread_workers", 2) or 2)
+    account_gap = int(config.get("account_gap_sec", 8) or 8)
     if parallel_enabled and parallel_workers > 1 and int(count) > 1:
         from registration_parallel import run_parallel_batch
         return run_parallel_batch(
@@ -662,6 +663,7 @@ def run_registration_common(count, log_callback, cancel_callback, accounts_outpu
             cleanup_interval=MEMORY_CLEANUP_INTERVAL,
             max_slot_retry=3,
             max_mail_retry=3,
+            account_gap=account_gap,
         )
     operations = RegistrationOperations(
         start_browser=lambda: start_browser(log_callback=log_callback),
@@ -697,6 +699,7 @@ def run_registration_common(count, log_callback, cancel_callback, accounts_outpu
         cleanup_interval=MEMORY_CLEANUP_INTERVAL,
         max_slot_retry=3,
         max_mail_retry=3,
+        account_gap=account_gap,
     )
 
 

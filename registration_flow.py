@@ -116,6 +116,7 @@ class RegistrationSettings:
     max_mail_retry: int = 3
     max_slot_retry: int = 3
     cleanup_interval: int = 5
+    account_gap: int = 8
 
 
 @dataclass
@@ -401,14 +402,17 @@ def _run_batch_managed(settings, callbacks, observer, ops):
                 except Exception as exc:
                     callbacks.log(f"[Debug] 代理租约释放失败: {exc}")
                 _notify_observer(observer, result, account, output, callbacks)
+            # 账号间冷却，降低请求频率，规避 grok 风控/IP 封禁
+            if settings.account_gap > 0 and not result.cancelled and continue_batch:
+                ops.sleep(settings.account_gap)
             if not continue_batch or result.cancelled: break
     finally:
         _run_cleanup_safely(ops, callbacks, "任务结束")
     return result
 
 
-def run_batch(count, callbacks, observer, ops, enable_nsfw=True, cleanup_interval=5, max_slot_retry=3, max_mail_retry=3, settings=None):
+def run_batch(count, callbacks, observer, ops, enable_nsfw=True, cleanup_interval=5, max_slot_retry=3, max_mail_retry=3, account_gap=8, settings=None):
     if settings is None:
-        settings = RegistrationSettings(count=int(count), enable_nsfw=bool(enable_nsfw), cleanup_interval=int(cleanup_interval), max_slot_retry=int(max_slot_retry), max_mail_retry=int(max_mail_retry))
+        settings = RegistrationSettings(count=int(count), enable_nsfw=bool(enable_nsfw), cleanup_interval=int(cleanup_interval), max_slot_retry=int(max_slot_retry), max_mail_retry=int(max_mail_retry), account_gap=int(account_gap))
     # All modes share the same stage-aware retry engine. begin_registration_slot() is a no-op when the proxy manager is unmanaged.
     return _run_batch_managed(settings, callbacks, observer, ops)

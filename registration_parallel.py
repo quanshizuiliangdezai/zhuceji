@@ -71,11 +71,11 @@ def _aggregate(snapshots):
 
 
 def run_parallel_batch(count, callbacks, observer, runtime_namespace, accounts_output_file,
-                       workers=4, enable_nsfw=True, cleanup_interval=5,
-                       max_slot_retry=3, max_mail_retry=3):
+                       workers=2, enable_nsfw=True, cleanup_interval=5,
+                       max_slot_retry=3, max_mail_retry=3, account_gap=8):
     worker_counts = split_worker_counts(count, workers)
-    if len(worker_counts) <= 1:
-        raise ValueError("parallel batch requires at least two active workers")
+    if len(worker_counts) < 1:
+        raise ValueError("parallel batch requires at least one worker")
 
     stats_lock = threading.Lock()
     observer_lock = threading.Lock()
@@ -210,6 +210,7 @@ def run_parallel_batch(count, callbacks, observer, runtime_namespace, accounts_o
                 cleanup_interval=int(cleanup_interval),
                 max_slot_retry=int(max_slot_retry),
                 max_mail_retry=int(max_mail_retry),
+                account_gap=int(account_gap),
             )
             with stats_lock:
                 snapshots[worker_id] = _summary_copy(batch)
