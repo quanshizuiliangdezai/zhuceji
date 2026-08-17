@@ -181,12 +181,32 @@ def restart_server(background_tasks: BackgroundTasks):
     import sys
 
     cfg = _load_server_json()
-    helper = [sys.executable, "-m", "web.restart_helper",
-              "--python", sys.executable,
+
+    # 优先用 pythonw.exe 启动，避免重启时闪控制台黑框
+    py = sys.executable
+    if py.endswith("python.exe"):
+        pythonw = py[:-10] + "pythonw.exe"
+        if os.path.isfile(pythonw):
+            py = pythonw
+
+    helper = [py, "-m", "web.restart_helper",
+              "--python", py,
               "--cwd", str(ROOT),
               "--host", cfg["host"],
               "--port", str(cfg["port"]),
               "--workers", str(cfg["workers"])]
+
+    creationflags = (
+        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        | getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+    startupinfo = None
+    if hasattr(subprocess, "STARTUPINFO"):
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0  # SW_HIDE
+
     try:
         subprocess.Popen(
             helper,
@@ -194,8 +214,8 @@ def restart_server(background_tasks: BackgroundTasks):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             close_fds=True,
-            creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                           | getattr(subprocess, "DETACHED_PROCESS", 0)),
+            creationflags=creationflags,
+            startupinfo=startupinfo,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail="启动重启助手失败: %s" % exc) from exc

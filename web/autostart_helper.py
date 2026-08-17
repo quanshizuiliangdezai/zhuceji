@@ -42,8 +42,9 @@ if (Test-Path $ServerJson) {
 $occupied = netstat -ano | Select-String ":$port\b" | Select-String 'LISTENING'
 if ($occupied) { exit 0 }
 
-# 解析 venv python（项目内优先，缺失则回退系统 python）
-$venvPy = Join-Path $Root '.venv\Scripts\python.exe'
+# 解析 venv pythonw（无窗口）；若缺失则回退 python/python3
+$venvPy = Join-Path $Root '.venv\Scripts\pythonw.exe'
+if (-not (Test-Path $venvPy)) { $venvPy = Join-Path $Root '.venv\Scripts\python.exe' }
 if (-not (Test-Path $venvPy)) { $venvPy = 'python' }
 
 # 后台、无窗口启动面板
