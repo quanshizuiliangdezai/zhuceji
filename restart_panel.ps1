@@ -39,20 +39,14 @@ Get-Process -Name python, pythonw -ErrorAction SilentlyContinue | Where-Object {
 }
 Start-Sleep -Seconds 3
 
-# 3. 决定目标端口：优先用正在跑的端口，否则用 server.json，再否则 8092
+# 3. 决定目标端口：一律以 server.json 为准（默认 8092），与配置保持一致，消除双端口混乱
 $cfgPort = 8092
 try {
     $cfg = Get-Content (Join-Path $root "server.json") -Encoding utf8 -ErrorAction SilentlyContinue | ConvertFrom-Json
-    if ($cfg.port) { $cfgPort = $cfg.port }
+    if ($cfg.port -and ($cfg.port -is [int])) { $cfgPort = $cfg.port }
 } catch {}
-if ($runningPorts.Count -gt 0) {
-    # 优先保留非默认端口（如用户实际在用的 8999），而非 8092
-    $nonDefault = $runningPorts | Where-Object { $_ -ne 8092 } | Select-Object -First 1
-    $targetPort = if ($nonDefault) { $nonDefault } else { $runningPorts[0] }
-} else {
-    $targetPort = $cfgPort
-}
-Write-Host ("    目标端口: " + $targetPort) -ForegroundColor Green
+$targetPort = $cfgPort
+Write-Host ("    目标端口(取自 server.json): " + $targetPort) -ForegroundColor Green
 
 # 4. 找可用的 Python（优先 venv 的 pythonw，再系统 Python）
 Write-Host "==> 3. find usable Python (venv pythonw first)" -ForegroundColor Cyan
