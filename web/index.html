@@ -729,14 +729,14 @@ async function loadTunnelConfig() {
     $('tunnelLocalPort').value = c.local_port || 18080;
     $('tunnelRemotePort').value = c.remote_port || 18080;
     $('tunnelPlinkPath').value = c.plink_path || '';
-    renderTunnelStatus(d.status, d.detail);
+    renderTunnelStatus(d.status, d.autostart);
     toggleTunnelPlinkBox();
   } catch (e) {
     setNotice(tt('loadFailed') + ': ' + e.message, true);
   }
 }
 
-function renderTunnelStatus(status, detail) {
+function renderTunnelStatus(status, autostart) {
   const state = $('tunnelState');
   const asState = $('tunnelAsState');
   if (state && status) {
@@ -745,8 +745,8 @@ function renderTunnelStatus(status, detail) {
       + (status.enabled ? tt('enabled') : tt('notBuilt'));
     state.className = 'tunnel-state ' + (running ? 'on' : 'off');
   }
-  if (asState && detail) {
-    asState.textContent = detail.installed ? tt('autostartOn') : tt('autostartOff');
+  if (asState && autostart) {
+    asState.textContent = autostart.installed ? tt('autostartOn') : tt('autostartOff');
   }
 }
 

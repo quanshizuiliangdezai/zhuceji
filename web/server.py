@@ -248,6 +248,7 @@ def get_tunnel_config():
         "key_pass_set": bool(cfg.get("key_pass")),
         "password_set": bool(cfg.get("password")),
         "status": th.tunnel_status(ROOT),
+        "autostart": th.autostart_status(ROOT),
     }
 
 
