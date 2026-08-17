@@ -74,6 +74,19 @@ DEFAULT_CONFIG = {
     "email_provider": "duckmail",
     "yyds_api_key": "",
     "yyds_jwt": "",
+    "sub2api_base_url": "",
+    "sub2api_email": "",
+    "sub2api_password": "",
+    "sub2api_group_id": 8,
+    "sub2api_auto_sync": False,
+    "sub2api_sync_interval_sec": 3600,
+    "sub2api_proxy_key": "http|127.0.0.1|10808||",
+    "sub2api_proxy_id": 0,
+    "sub2api_grok_model": "grok-4.6",
+    "sub2api_target_available": 0,
+    "sub2api_max_register_batch": 5,
+    "sub2api_pool_check_interval_sec": 300,
+    "sub2api_account_concurrency": 1,
     "defaultDomains": "",
 }
 
@@ -127,6 +140,7 @@ def validate_config_structure(raw):
         "cpa_mint_cookie_inject", "multi_thread_enabled",
         "proxy_pool_probe_dual_stack", "proxy_pool_persist_health",
         "proxy_pool_subscription_public_only", "proxy_pool_preflight_enabled",
+        "sub2api_auto_sync",
     )
     for key in bool_keys:
         cfg[key] = _require_bool(cfg, key)
@@ -143,6 +157,13 @@ def validate_config_structure(raw):
     cfg["cpa_mint_timeout_sec"] = _require_int(cfg, "cpa_mint_timeout_sec", 30, 1800)
     cfg["cpa_oidc_request_timeout_sec"] = _require_int(cfg, "cpa_oidc_request_timeout_sec", 3, 120)
     cfg["cpa_oidc_poll_timeout_sec"] = _require_int(cfg, "cpa_oidc_poll_timeout_sec", 3, 120)
+    cfg["sub2api_group_id"] = _require_int(cfg, "sub2api_group_id", 0, 999999)
+    cfg["sub2api_sync_interval_sec"] = _require_int(cfg, "sub2api_sync_interval_sec", 60, 86400)
+    cfg["sub2api_proxy_id"] = _require_int(cfg, "sub2api_proxy_id", 0, 999999)
+    cfg["sub2api_target_available"] = _require_int(cfg, "sub2api_target_available", 0, 999999)
+    cfg["sub2api_max_register_batch"] = _require_int(cfg, "sub2api_max_register_batch", 1, 1000)
+    cfg["sub2api_pool_check_interval_sec"] = _require_int(cfg, "sub2api_pool_check_interval_sec", 60, 86400)
+    cfg["sub2api_account_concurrency"] = _require_int(cfg, "sub2api_account_concurrency", 1, 100)
     string_keys = tuple(key for key, value in DEFAULT_CONFIG.items() if isinstance(value, str))
     path_keys = {
         "grok2api_local_token_file", "api_reverse_tools", "cpa_auth_dir", "cpa_hotload_dir",
