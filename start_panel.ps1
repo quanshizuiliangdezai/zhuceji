@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'SilentlyContinue'
+﻿$ErrorActionPreference = 'SilentlyContinue'
 $root = "C:\Users\13370\zhuceji"
 Set-Location $root
 
