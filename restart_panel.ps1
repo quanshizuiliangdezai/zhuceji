@@ -5,8 +5,9 @@ Set-Location $root
 # 0. 拉取最新代码（best-effort，失败也继续用当前代码）
 Write-Host "==> 0. git pull latest (feat/sub2api-discover)" -ForegroundColor Cyan
 try {
-    $out = & git pull origin feat/sub2api-discover 2>&1
-    $out | ForEach-Object { Write-Host ("    " + $_) }
+    $gpLog = Join-Path $root "restart_panel_gitpull.log"
+    & git pull origin feat/sub2api-discover 2>&1 | Out-File -FilePath $gpLog -Encoding utf8
+    Write-Host "    git pull 完成（详情见 restart_panel_gitpull.log）" -ForegroundColor Gray
 } catch {
     Write-Host ("    (git pull 失败，继续使用当前代码: " + $_.Exception.Message + ")") -ForegroundColor Yellow
 }
@@ -76,13 +77,18 @@ Start-Process -FilePath $py -ArgumentList "-m", "web.server", "--port", $targetP
 
 Start-Sleep -Seconds 6
 
+$resultLog = Join-Path $root "restart_panel_result.log"
 if (Get-NetTCPConnection -LocalPort $targetPort -ErrorAction SilentlyContinue) {
+    $msg = ("[OK] " + $targetPort + " is listening. 请浏览器打开 http://127.0.0.1:" + $targetPort + " 并按 Ctrl+F5 强刷。")
     Write-Host ""
-    Write-Host ("[OK] " + $targetPort + " is listening, open http://127.0.0.1:" + $targetPort + " (press Ctrl+F5 to hard refresh)") -ForegroundColor Green
+    Write-Host $msg -ForegroundColor Green
+    $msg | Out-File -FilePath $resultLog -Encoding utf8
 } else {
+    $errTail = (Get-Content (Join-Path $root "_web_start.err") -Tail 30 -ErrorAction SilentlyContinue) -join "`n"
+    $msg = ("[FAIL] " + $targetPort + " 启动失败，请看 " + (Join-Path $root "_web_start.err") + "`n" + $errTail)
     Write-Host ""
-    Write-Host ("[FAIL] " + $targetPort + " failed to start, error log:") -ForegroundColor Red
-    Get-Content (Join-Path $root "_web_start.err") -Tail 30
+    Write-Host $msg -ForegroundColor Red
+    $msg | Out-File -FilePath $resultLog -Encoding utf8
 }
 Write-Host ""
 Write-Host "--- _web_start.log (tail) ---" -ForegroundColor Cyan
