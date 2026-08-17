@@ -796,9 +796,19 @@ def test_tunnel(root: Path, cfg: dict) -> dict:
 # 开机自启（任务计划 ONLOGON）
 # ---------------------------------------------------------------------------
 def autostart_status(root: Path) -> dict:
+    task_installed = _task_exists()
+    startup_installed = _startup_exists()
+    method = None
+    if task_installed:
+        method = "task_scheduler"
+    elif startup_installed:
+        method = "startup_folder"
     return {
         "ok": True,
-        "installed": _task_exists(),
+        "installed": task_installed or startup_installed,
+        "task_scheduler": task_installed,
+        "startup_folder": startup_installed,
+        "method": method,
         "task_name": TUNNEL_TASK,
         "is_windows": sys.platform == "win32",
         "plink": check_plink(root, read_cfg(root)),
@@ -837,22 +847,60 @@ def _task_exists() -> bool:
         return False
 
 
+def _startup_folder() -> Path:
+    """返回当前用户 Windows 启动文件夹路径（不需要管理员权限）。"""
+    if sys.platform == "win32":
+        return Path(os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"))
+    return Path.home() / ".config" / "autostart"
+
+
+def _startup_launcher() -> Path:
+    return _startup_folder() / (TUNNEL_TASK + ".vbs")
+
+
+def _startup_exists() -> bool:
+    return _startup_launcher().is_file()
+
+
+def _resolve_windows_python(root: Path) -> Path:
+    """为开机自启选择最可靠的 Windows Python 解释器。
+
+    优先顺序：.venv pythonw → .venv python → 系统安装 pythonw/python
+    → 当前运行 server.py 的解释器。避免 Microsoft Store 桩导致空 venv。
+    """
+    candidates = [
+        root / ".venv" / "Scripts" / "pythonw.exe",
+        root / ".venv" / "Scripts" / "python.exe",
+    ]
+    # 扫描常见系统安装目录（如 Python312/Python313）
+    try:
+        sys_dir = Path.home() / "AppData" / "Local" / "Programs" / "Python"
+        if sys_dir.is_dir():
+            for sub in sorted(sys_dir.iterdir()):
+                if sub.is_dir():
+                    candidates.append(sub / "pythonw.exe")
+                    candidates.append(sub / "python.exe")
+    except Exception:
+        pass
+    candidates.append(Path(sys.executable))
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    return Path(sys.executable)
+
+
 def _write_autostart_launcher(root: Path) -> Path:
     """生成无窗口自启启动器（Windows 用 VBS，POSIX 用 shell 脚本）。"""
     is_win = sys.platform == "win32"
     runner = root / "scripts" / "tunnel_runner.py"
     if is_win:
-        pythonw = root / ".venv" / "Scripts" / "pythonw.exe"
-        if not pythonw.is_file():
-            pythonw = root / ".venv" / "Scripts" / "python.exe"
-        if not pythonw.is_file():
-            pythonw = Path(sys.executable)
+        python = _resolve_windows_python(root)
         # VBS：0=Hidden, False=不等待，确保无黑框且任务计划立即返回
         vbs = (
             'Set WshShell = CreateObject("WScript.Shell")\n'
             'WshShell.Run "\"{py}\" \"{script}\"", 0, False\n'
         ).format(
-            py=str(pythonw).replace("\\", "\\\\").replace('"', '\\"'),
+            py=str(python).replace("\\", "\\\\").replace('"', '\\"'),
             script=str(runner).replace("\\", "\\\\").replace('"', '\\"'),
         )
         launcher = root / "autostart_tunnel.vbs"
@@ -875,6 +923,7 @@ def _write_autostart_launcher(root: Path) -> Path:
 
 
 def _install_windows(launcher: Path) -> dict:
+    """先尝试任务计划（系统级），非管理员失败时降级到当前用户启动文件夹。"""
     wscript = os.path.expandvars(r"%SystemRoot%\System32\wscript.exe")
     if not Path(wscript).is_file():
         wscript = r"C:\Windows\System32\wscript.exe"
@@ -884,16 +933,51 @@ def _install_windows(launcher: Path) -> dict:
     )
     out = _run(["schtasks", "/Create", "/TN", TUNNEL_TASK, "/SC", "ONLOGON",
                 "/TR", tr, "/F"], timeout=60)
-    if out.returncode != 0:
-        return {"ok": False, "message": "创建任务计划失败",
-                "stderr": (out.stderr or out.stdout).strip()}
-    return {"ok": True, "message": "已设置开机自启（登录时后台建立隧道，带重连）",
-            "launcher": str(launcher)}
+    if out.returncode == 0:
+        # 任务计划成功时，清理可能存在的旧启动文件夹项，避免重复启动
+        _remove_startup_launcher()
+        return {"ok": True, "message": "已设置开机自启（任务计划，登录时后台建立隧道，带重连）",
+                "launcher": str(launcher), "method": "task_scheduler"}
+
+    # 任务计划失败（常见原因：非管理员 / UAC 被禁 / 任务计划服务未运行）
+    # 降级到当前用户启动文件夹，无需管理员权限
+    stderr = (out.stderr or out.stdout).strip()
+    try:
+        _startup_folder().mkdir(parents=True, exist_ok=True)
+        startup_file = _startup_launcher()
+        # 直接拷贝项目根下的 VBS 到启动文件夹；路径相同，运行方式一致
+        shutil.copy2(str(launcher), str(startup_file))
+        return {"ok": True,
+                "message": "已设置开机自启（启动文件夹，无需管理员；登录时后台建立隧道，带重连）",
+                "launcher": str(startup_file), "method": "startup_folder",
+                "fallback_reason": stderr}
+    except Exception as exc:
+        return {"ok": False,
+                "message": "创建任务计划失败，且写入启动文件夹也失败",
+                "task_scheduler_error": stderr,
+                "startup_folder_error": str(exc)}
+
+
+def _remove_startup_launcher() -> bool:
+    p = _startup_launcher()
+    if p.is_file():
+        try:
+            p.unlink()
+            return True
+        except Exception:
+            pass
+    return False
 
 
 def _remove_windows() -> dict:
+    removed_task = False
     out = _run(["schtasks", "/Delete", "/TN", TUNNEL_TASK, "/F"], timeout=60)
-    return {"ok": True, "message": "已取消开机自启", "removed": out.returncode == 0}
+    removed_task = out.returncode == 0
+    removed_startup = _remove_startup_launcher()
+    if removed_task or removed_startup:
+        return {"ok": True, "message": "已取消开机自启",
+                "removed": {"task_scheduler": removed_task, "startup_folder": removed_startup}}
+    return {"ok": True, "message": "未发现开机自启项", "removed": {}}
 
 
 def _install_posix(launcher: Path) -> dict:
