@@ -45,7 +45,13 @@ try {
     $cfg = Get-Content (Join-Path $root "server.json") -Encoding utf8 -ErrorAction SilentlyContinue | ConvertFrom-Json
     if ($cfg.port) { $cfgPort = $cfg.port }
 } catch {}
-$targetPort = if ($runningPorts.Count -gt 0) { $runningPorts[0] } else { $cfgPort }
+if ($runningPorts.Count -gt 0) {
+    # 优先保留非默认端口（如用户实际在用的 8999），而非 8092
+    $nonDefault = $runningPorts | Where-Object { $_ -ne 8092 } | Select-Object -First 1
+    $targetPort = if ($nonDefault) { $nonDefault } else { $runningPorts[0] }
+} else {
+    $targetPort = $cfgPort
+}
 Write-Host ("    目标端口: " + $targetPort) -ForegroundColor Green
 
 # 4. 找可用的 Python（优先 venv 的 pythonw，再系统 Python）
