@@ -116,8 +116,25 @@ def ssh_exe() -> str:
     return "ssh"
 
 
-def _run(cmd, input_text=None, timeout=60, cwd=None):
-    """统一执行子进程，读取输出时容忍非 UTF-8（中文系统命令输出可能非 UTF-8）。"""
+def _no_window_kwargs():
+    """返回 Windows 下隐藏控制台黑框的 subprocess 参数。"""
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if hasattr(subprocess, "STARTUPINFO"):
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0  # SW_HIDE
+            kwargs["startupinfo"] = si
+    return kwargs
+
+
+def _run(cmd, input_text=None, timeout=60, cwd=None, no_window=True):
+    """统一执行子进程，读取输出时容忍非 UTF-8（中文系统命令输出可能非 UTF-8）。
+
+    默认在 Windows 上隐藏控制台窗口，避免 taskkill/wmic/plink 等命令闪黑框。
+    """
+    kwargs = _no_window_kwargs() if no_window else {}
     return subprocess.run(
         cmd,
         input=input_text,
@@ -127,6 +144,7 @@ def _run(cmd, input_text=None, timeout=60, cwd=None):
         errors="replace",
         timeout=timeout,
         cwd=cwd,
+        **kwargs,
     )
 
 
@@ -481,9 +499,13 @@ def _pid_alive(pid: int) -> bool:
             return True
         return False
     except Exception:
-        # fallback: 用 tasklist
+        # fallback: 用 tasklist（隐藏黑框）
         try:
-            subprocess.check_output(["tasklist", "/FI", "PID eq %s" % pid], timeout=5)
+            subprocess.check_output(
+                ["tasklist", "/FI", "PID eq %s" % pid],
+                timeout=5,
+                **_no_window_kwargs(),
+            )
             return True
         except Exception:
             return False
@@ -598,9 +620,14 @@ def start_tunnel(root: Path, cfg: dict) -> dict:
     try:
         out_f = open(str(diag_out), "wb")
         err_f = open(str(diag_err), "wb")
-        # 隐藏 Windows 控制台黑框；pythonw.exe 本身无窗口；额外加 CREATE_NO_WINDOW 保险
+        # 隐藏 Windows 控制台黑框；pythonw.exe 本身无窗口；额外加 CREATE_NO_WINDOW + SW_HIDE 保险
         creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
                          | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        startupinfo = None
+        if hasattr(subprocess, "STARTUPINFO"):
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
         proc = subprocess.Popen(
             runner_cmd,
             cwd=str(root),
@@ -608,6 +635,7 @@ def start_tunnel(root: Path, cfg: dict) -> dict:
             stderr=err_f,
             close_fds=True,
             creationflags=creationflags,
+            startupinfo=startupinfo,
         )
         popen_pid = proc.pid
     except Exception as exc:
