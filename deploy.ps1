@@ -31,8 +31,9 @@ function Find-RealPython {
   }
 
   # (b) 扫描常见安装目录
+  $localAppDataPython = Join-Path $env:LOCALAPPDATA "Programs\Python"
   $scanRoots = @(
-    Join-Path $env:LOCALAPPDATA "Programs\Python",
+    $localAppDataPython,
     "C:\Python*",
     "C:\Program Files\Python*",
     "C:\Program Files (x86)\Python*"
