@@ -30,7 +30,7 @@ SERVER_JSON = ROOT / "server.json"
 GROK_SUBSCRIPTION_PROXY = "https://cli-chat-proxy.grok.com/v1"
 LOG_LIMIT = 2000
 
-app = FastAPI(title="grok-register WebUI", version="1.1")
+app = FastAPI(title="grok-register WebUI", version="1.2")
 
 _job_lock = threading.Lock()
 _job_thread: Optional[threading.Thread] = None
@@ -43,6 +43,7 @@ _job_state = {
     "fail": 0,
     "pending": 0,
     "warnings": 0,
+    "uncertain": 0,
     "cancelled": False,
     "started_at": None,
     "finished_at": None,
@@ -86,6 +87,7 @@ def _update_progress(batch: Any) -> None:
         _job_state["fail"] = int(batch.fail_count)
         _job_state["pending"] = int(batch.registered_unsaved_count)
         _job_state["warnings"] = int(batch.postprocess_warning_count)
+        _job_state["uncertain"] = int(getattr(batch, "uncertain_count", 0) or 0)
         _job_state["cancelled"] = bool(batch.cancelled)
 
 
@@ -436,6 +438,27 @@ def proxy_pool_test():
     return {"ok": True, "results": results, **manager.snapshot()}
 
 
+@app.post("/api/proxy-pool/preflight")
+def proxy_pool_preflight(node_id: str = Query(..., min_length=1)):
+    from proxy_pool import get_manager
+    with _job_lock:
+        if _job_state["running"]:
+            raise HTTPException(status_code=409, detail="任务运行期间不能执行注册路径预检")
+        engine.load_config()
+        try:
+            cfg = engine.validate_config_structure(dict(engine.config))
+            if not cfg.get("proxy_pool_preflight_enabled", True):
+                raise HTTPException(status_code=409, detail="注册路径预检已在配置中关闭")
+            manager = get_manager(config=cfg, log=_append_log)
+            result = manager.preflight_node(node_id)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _append_log("[*] 代理节点注册路径预检完成: %s" % node_id)
+    return {"ok": True, "result": result, **manager.snapshot()}
+
+
 @app.get("/api/status")
 def status():
     return {"ok": True, **_state_snapshot()}
@@ -671,6 +694,7 @@ def start():
             "fail": 0,
             "pending": 0,
             "warnings": 0,
+            "uncertain": 0,
             "cancelled": False,
             "started_at": time.time(),
             "finished_at": None,

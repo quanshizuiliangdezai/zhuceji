@@ -30,9 +30,21 @@ DEFAULT_CONFIG = {
     "proxy_pool_probe_interval_sec": 900,
     "proxy_pool_probe_timeout_sec": 15,
     "proxy_pool_probe_provider": "cloudflare",
+    "proxy_pool_probe_dual_stack": True,
     "proxy_pool_max_concurrent_per_node": 1,
     "proxy_pool_acquire_timeout_sec": 30,
+    "proxy_protocol_backend": "auto",
+    "proxy_singbox_path": "",
+    "proxy_protocol_start_timeout_sec": 10,
+    "proxy_runtime_idle_ttl_sec": 120,
+    "proxy_runtime_cache_max": 32,
+    "proxy_pool_persist_health": False,
+    "proxy_pool_state_file": "./proxy_pool_state.json",
+    "proxy_pool_subscription_public_only": False,
+    "proxy_pool_preflight_enabled": True,
     "enable_nsfw": True,
+    "sso_risk_gate_enabled": True,
+    "sso_risk_rejected_file": "./sso_risk_rejected.txt",
     "register_count": 1,
     "multi_thread_enabled": False,
     "multi_thread_workers": 4,
@@ -104,12 +116,17 @@ def _require_string(cfg, key, path=False):
 def validate_config_structure(raw):
     if not isinstance(raw, dict):
         raise ConfigError("config root must be a JSON object")
+    unknown = sorted(set(raw) - set(DEFAULT_CONFIG))
+    if unknown:
+        raise ConfigError("未知配置项: " + ", ".join(unknown))
     cfg = {**DEFAULT_CONFIG, **raw}
     bool_keys = (
-        "enable_nsfw", "grok2api_auto_add_local", "grok2api_auto_add_remote",
+        "enable_nsfw", "sso_risk_gate_enabled", "grok2api_auto_add_local", "grok2api_auto_add_remote",
         "grok2api_allow_legacy_full_save", "cpa_export_enabled",
         "cpa_copy_to_hotload", "cpa_headless", "cpa_force_standalone",
         "cpa_mint_cookie_inject", "multi_thread_enabled",
+        "proxy_pool_probe_dual_stack", "proxy_pool_persist_health",
+        "proxy_pool_subscription_public_only", "proxy_pool_preflight_enabled",
     )
     for key in bool_keys:
         cfg[key] = _require_bool(cfg, key)
@@ -120,13 +137,17 @@ def validate_config_structure(raw):
     cfg["proxy_pool_probe_timeout_sec"] = _require_int(cfg, "proxy_pool_probe_timeout_sec", 3, 120)
     cfg["proxy_pool_max_concurrent_per_node"] = _require_int(cfg, "proxy_pool_max_concurrent_per_node", 1, 64)
     cfg["proxy_pool_acquire_timeout_sec"] = _require_int(cfg, "proxy_pool_acquire_timeout_sec", 1, 600)
+    cfg["proxy_protocol_start_timeout_sec"] = _require_int(cfg, "proxy_protocol_start_timeout_sec", 3, 60)
+    cfg["proxy_runtime_idle_ttl_sec"] = _require_int(cfg, "proxy_runtime_idle_ttl_sec", 0, 3600)
+    cfg["proxy_runtime_cache_max"] = _require_int(cfg, "proxy_runtime_cache_max", 1, 256)
     cfg["cpa_mint_timeout_sec"] = _require_int(cfg, "cpa_mint_timeout_sec", 30, 1800)
     cfg["cpa_oidc_request_timeout_sec"] = _require_int(cfg, "cpa_oidc_request_timeout_sec", 3, 120)
     cfg["cpa_oidc_poll_timeout_sec"] = _require_int(cfg, "cpa_oidc_poll_timeout_sec", 3, 120)
     string_keys = tuple(key for key, value in DEFAULT_CONFIG.items() if isinstance(value, str))
     path_keys = {
         "grok2api_local_token_file", "api_reverse_tools", "cpa_auth_dir", "cpa_hotload_dir",
-        "proxy_pool_file",
+        "proxy_pool_file", "proxy_singbox_path", "proxy_pool_state_file",
+        "sso_risk_rejected_file",
     }
     for key in string_keys:
         cfg[key] = _require_string(cfg, key, path=key in path_keys)
@@ -197,6 +218,8 @@ def validate_run_requirements(cfg):
         raise ConfigError("pool 代理模式至少需要 proxy_pool_file 或 proxy_pool_subscription_url")
     if cfg["proxy_fallback"] == "single" and not cfg["proxy"]:
         raise ConfigError("proxy_fallback=single 时必须配置 proxy")
+    if cfg["proxy_pool_persist_health"] and not cfg["proxy_pool_state_file"]:
+        raise ConfigError("启用代理健康状态持久化时必须配置 proxy_pool_state_file")
 
     if cfg["grok2api_auto_add_remote"]:
         if not cfg["grok2api_remote_base"]:
