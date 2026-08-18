@@ -1,7 +1,7 @@
 name: sync-upstream
 
 # 方案 B：main 永远保持 fork 原样（不碰业务代码），
-# upstream-sync 维护纯上游镜像，功能分支定期 rebase 到 upstream-sync。
+# upstream-sync 维护纯上游镜像，功能分支定期 rebase 到 upstream/main。
 on:
   schedule:
     - cron: '23 * * * *'
@@ -37,7 +37,7 @@ jobs:
           git checkout -B upstream-sync upstream/main
           git push origin upstream-sync --force
 
-      - name: Rebase feature branch onto upstream-sync
+      - name: Rebase feature branch onto upstream/main
         id: rebase
         continue-on-error: true
         run: |
@@ -45,6 +45,16 @@ jobs:
           if ! git show-ref --verify --quiet "refs/remotes/origin/$FEAT"; then
             echo "feat branch $FEAT not found on origin, skip rebase"
             echo "rebased=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Guard: only rebase when upstream/main actually has NEW commits.
+          # If upstream/main is already an ancestor of feat, there is nothing to
+          # rebase. Previously this step errored on the runner (e.g. failed
+          # fetch/push) and was misreported as a "conflict", spamming one issue
+          # per hourly run even when upstream had not changed.
+          if git merge-base --is-ancestor "upstream/main" "origin/$FEAT"; then
+            echo "upstream/main already merged into $FEAT; nothing to rebase"
+            echo "rebased=uptodate" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git checkout "$FEAT"
@@ -56,14 +66,26 @@ jobs:
             echo "rebased=conflict" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Notify on rebase conflict
+      - name: Notify on rebase conflict (deduplicated)
         if: steps.rebase.outputs.rebased == 'conflict'
         uses: actions/github-script@v7
         with:
           script: |
+            const title = '⚠️ feat/sub2api-discover 无法自动 rebase 到 upstream（存在冲突）';
+            // Dedup: never create a second open issue with the same title.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            if (existing.data.some(i => i.title === title)) {
+              console.log('An open conflict issue already exists; skipping duplicate creation.');
+              return;
+            }
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '⚠️ feat/sub2api-discover 无法自动 rebase 到 upstream（存在冲突）',
+              title: title,
               body: '上游有更新且自动 rebase 出现冲突，已中止以免丢失代码。\n\n请手动处理：\n```\ngit fetch upstream\ngit checkout feat/sub2api-discover\ngit rebase upstream/main\n# 解决冲突后\ngit push origin feat/sub2api-discover --force-with-lease\n```'
-            })
+            });
