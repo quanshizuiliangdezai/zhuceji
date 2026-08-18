@@ -99,9 +99,10 @@ function Install-PanelAutostart {
   param($RootPath)
   try {
     $startupDir = [System.Environment]::GetFolderPath('Startup')
-    $lnkPath    = Join-Path $startupDir "grok-register-panel.lnk"
     $psExe      = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     $launch     = Join-Path $RootPath "launch_panel.ps1"
+    $regPath    = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    $regName    = "grok-register-panel"
 
     $oldVbs = Join-Path $startupDir "grok-register-tunnel-autostart.vbs"
     if (Test-Path $oldVbs) { Remove-Item $oldVbs -Force -ErrorAction SilentlyContinue }
@@ -110,15 +111,9 @@ function Install-PanelAutostart {
       Write-Host "    (跳过: 未找到 $launch)" -ForegroundColor Gray
       return
     }
-    $ws = New-Object -ComObject WScript.Shell
-    $sc = $ws.CreateShortcut($lnkPath)
-    $sc.TargetPath = $psExe
-    $sc.Arguments  = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launch`""
-    $sc.WorkingDirectory = $RootPath
-    $sc.WindowStyle = 7
-    $sc.Description = "grok-register 面板开机自启 (静默)"
-    $sc.Save()
-    Write-Host ("    [OK] 已确保开机自启存在: " + $lnkPath) -ForegroundColor Green
+    $value = "`"$psExe`" -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launch`""
+    Set-ItemProperty -Path $regPath -Name $regName -Value $value -Type String
+    Write-Host ("    [OK] 已确保开机自启存在 (注册表): " + $regName) -ForegroundColor Green
   } catch {
     Write-Host ("    (开机自启配置失败: " + $_.Exception.Message + ")") -ForegroundColor Yellow
   }
