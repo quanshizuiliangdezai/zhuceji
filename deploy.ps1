@@ -163,3 +163,36 @@ if ($Up) {
   if (Test-Path $ErrLog)  { Get-Content $ErrLog  -Tail 20 }
   exit 1
 }
+
+# ---- 7. 安装开机自启 (静默, 不使用 vbs) ----
+function Install-PanelAutostart {
+  param($RootPath)
+  try {
+    $startupDir = [System.Environment]::GetFolderPath('Startup')
+    $lnkPath    = Join-Path $startupDir "grok-register-panel.lnk"
+    $psExe      = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $launch     = Join-Path $RootPath "launch_panel.ps1"
+
+    # 清理历史上报错的 vbs 自启残留 (用户已要求弃用 vbs)
+    $oldVbs = Join-Path $startupDir "grok-register-tunnel-autostart.vbs"
+    if (Test-Path $oldVbs) { Remove-Item $oldVbs -Force -ErrorAction SilentlyContinue }
+
+    if (-not (Test-Path $launch)) {
+      Write-Host "    (跳过: 未找到 $launch)"
+      return
+    }
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut($lnkPath)
+    $sc.TargetPath = $psExe
+    $sc.Arguments  = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launch`""
+    $sc.WorkingDirectory = $RootPath
+    $sc.WindowStyle = 7   # 7 = Minimized (配合 -WindowStyle Hidden 实际不显示窗口)
+    $sc.Description = "grok-register 面板开机自启 (静默)"
+    $sc.Save()
+    Write-Host "[OK] 已安装开机自启: $lnkPath"
+  } catch {
+    Write-Host ("    [警告] 开机自启配置失败: " + $_.Exception.Message)
+  }
+}
+Write-Host "[5/5] 配置开机自启 (静默启动器) ..."
+Install-PanelAutostart -RootPath $Root
