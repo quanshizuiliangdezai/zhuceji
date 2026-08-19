@@ -643,7 +643,7 @@ def sso_accounts():
 @app.get("/api/sso/export-sub2api")
 def sso_export_sub2api(email: Optional[str] = None):
     accounts = []
-    concurrency = int(engine.config.get("sub2api_account_concurrency") or 1)
+    concurrency = int(engine.config.get("sub2api_capacity") or engine.config.get("sub2api_account_concurrency") or 1)
     for data in _read_sso_accounts():
         if email and data.get("email") != email:
             continue
@@ -797,8 +797,7 @@ def _sub2api_cfg() -> dict:
         "target_available": int(c.get("sub2api_target_available") or 0),
         "max_register_batch": max(1, int(c.get("sub2api_max_register_batch") or 5)),
         "pool_check_interval": max(60, int(c.get("sub2api_pool_check_interval_sec") or 300)),
-        "concurrency": max(1, int(c.get("sub2api_account_concurrency") or 1)),
-        "capacity": max(1, int(c.get("sub2api_capacity") or 1)),
+        "concurrency": max(1, int(c.get("sub2api_capacity") or c.get("sub2api_account_concurrency") or 1)),
     }
 
 
@@ -845,8 +844,7 @@ def _sub2api_list_grok(token: str, base: str) -> list:
 
 
 def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str,
-                        proxy_id: int = 0, model: str = "grok-4.6", concurrency: int = 1,
-                        capacity: int = 1):
+                        proxy_id: int = 0, model: str = "grok-4.6", concurrency: int = 1):
     creds = {"access_token": acc["access_token"], "base_url": acc["base_url"] or GROK_SUBSCRIPTION_PROXY}
     if acc.get("refresh_token"):
         creds["refresh_token"] = acc["refresh_token"]
@@ -861,7 +859,7 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str,
         "platform": "grok", "type": "oauth",
         "credentials": creds,
         "proxy_key": proxy_key,
-        "concurrency": max(1, int(concurrency or 1)), "capacity": max(1, int(capacity or 1)),
+        "concurrency": max(1, int(concurrency or 1)),
         "priority": 1, "rate_multiplier": 1,
         "auto_pause_on_expired": True,
     }
@@ -878,12 +876,12 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str,
 
 
 def _sub2api_update_account(acc_id, group_id, base: str, token: str, proxy_id: int = 0,
-                           capacity: int = 0):
+                           concurrency: int = 0):
     body = {"group_ids": [int(group_id)]}
     if proxy_id:
         body["proxy_id"] = int(proxy_id)
-    if capacity:
-        body["capacity"] = max(1, int(capacity))
+    if concurrency:
+        body["concurrency"] = max(1, int(concurrency))
     _http_json("PUT", base + "/api/v1/admin/accounts/%d" % int(acc_id),
                token=token, body=body)
 
@@ -916,7 +914,7 @@ def _sso_sync_once() -> dict:
             if matched:
                 for a in matched:
                     _sub2api_update_account(a["id"], cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"],
-                                           capacity=cfg.get("capacity", 1))
+                                           concurrency=cfg.get("concurrency", 1))
                     linked += 1
                     # 已存在但缺模型的，自动补上（合并 PUT，不动 token）
                     if not (a.get("credentials") or {}).get("model_mapping"):
@@ -924,25 +922,24 @@ def _sso_sync_once() -> dict:
                         modeled += 1
             else:
                 new_id = _sub2api_import_one(acc, cfg["base_url"], token, cfg["proxy_key"],
-                                             cfg["proxy_id"], cfg["model"], cfg.get("concurrency", 1),
-                                             cfg.get("capacity", 1))
+                                             cfg["proxy_id"], cfg["model"], cfg.get("concurrency", 1))
                 if new_id:
                     _sub2api_update_account(new_id, cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"],
-                                           capacity=cfg.get("capacity", 1))
+                                           concurrency=cfg.get("concurrency", 1))
                     added += 1
                     # 回填匹配表，防止 local 万一有重复 email 时本轮后续再次新建
                     remote_by_name.setdefault(name, []).append({"id": new_id})
-        # 广播 capacity 到所有远端账号（即使本地没对应文件，也同步容量配置变更）
-        target_capacity = max(1, int(cfg.get("capacity") or 1))
-        capacity_synced = 0
-        capacity_skipped = 0
+        # 广播并发数到所有远端账号（即使本地没对应文件，也同步配置变更）
+        target_concurrency = max(1, int(cfg.get("concurrency") or 1))
+        concurrency_synced = 0
+        concurrency_skipped = 0
         for a in remote:
-            if int(a.get("capacity") or 0) == target_capacity:
-                capacity_skipped += 1
+            if int(a.get("concurrency") or 0) == target_concurrency:
+                concurrency_skipped += 1
                 continue
             _sub2api_update_account(a["id"], cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"],
-                                   capacity=target_capacity)
-            capacity_synced += 1
+                                   concurrency=target_concurrency)
+            concurrency_synced += 1
         deleted = 0
         now = _utc_now()
         for a in remote:
@@ -953,7 +950,7 @@ def _sso_sync_once() -> dict:
         return {"ok": True, "added": added, "linked": linked, "modeled": modeled, "deleted": deleted,
                 "local": len(local), "remote_total": len(remote), "available": available,
                 "target": cfg["target_available"],
-                "capacity_synced": capacity_synced, "capacity_skipped": capacity_skipped}
+                "concurrency_synced": concurrency_synced, "concurrency_skipped": concurrency_skipped}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": str(exc)}
 
