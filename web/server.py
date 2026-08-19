@@ -877,10 +877,13 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str,
     return None
 
 
-def _sub2api_update_account(acc_id, group_id, base: str, token: str, proxy_id: int = 0):
+def _sub2api_update_account(acc_id, group_id, base: str, token: str, proxy_id: int = 0,
+                           capacity: int = 0):
     body = {"group_ids": [int(group_id)]}
     if proxy_id:
         body["proxy_id"] = int(proxy_id)
+    if capacity:
+        body["capacity"] = max(1, int(capacity))
     _http_json("PUT", base + "/api/v1/admin/accounts/%d" % int(acc_id),
                token=token, body=body)
 
@@ -912,7 +915,8 @@ def _sso_sync_once() -> dict:
             matched = remote_by_name.get(name)
             if matched:
                 for a in matched:
-                    _sub2api_update_account(a["id"], cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"])
+                    _sub2api_update_account(a["id"], cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"],
+                                           capacity=cfg.get("capacity", 1))
                     linked += 1
                     # 已存在但缺模型的，自动补上（合并 PUT，不动 token）
                     if not (a.get("credentials") or {}).get("model_mapping"):
@@ -923,7 +927,8 @@ def _sso_sync_once() -> dict:
                                              cfg["proxy_id"], cfg["model"], cfg.get("concurrency", 1),
                                              cfg.get("capacity", 1))
                 if new_id:
-                    _sub2api_update_account(new_id, cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"])
+                    _sub2api_update_account(new_id, cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"],
+                                           capacity=cfg.get("capacity", 1))
                     added += 1
                     # 回填匹配表，防止 local 万一有重复 email 时本轮后续再次新建
                     remote_by_name.setdefault(name, []).append({"id": new_id})
