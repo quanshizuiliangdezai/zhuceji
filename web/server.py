@@ -932,6 +932,17 @@ def _sso_sync_once() -> dict:
                     added += 1
                     # 回填匹配表，防止 local 万一有重复 email 时本轮后续再次新建
                     remote_by_name.setdefault(name, []).append({"id": new_id})
+        # 广播 capacity 到所有远端账号（即使本地没对应文件，也同步容量配置变更）
+        target_capacity = max(1, int(cfg.get("capacity") or 1))
+        capacity_synced = 0
+        capacity_skipped = 0
+        for a in remote:
+            if int(a.get("capacity") or 0) == target_capacity:
+                capacity_skipped += 1
+                continue
+            _sub2api_update_account(a["id"], cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"],
+                                   capacity=target_capacity)
+            capacity_synced += 1
         deleted = 0
         now = _utc_now()
         for a in remote:
@@ -941,7 +952,8 @@ def _sso_sync_once() -> dict:
         available = sum(1 for a in remote if cfg["group_id"] in (a.get("group_ids") or []) and _sub2api_is_available(a, now))
         return {"ok": True, "added": added, "linked": linked, "modeled": modeled, "deleted": deleted,
                 "local": len(local), "remote_total": len(remote), "available": available,
-                "target": cfg["target_available"]}
+                "target": cfg["target_available"],
+                "capacity_synced": capacity_synced, "capacity_skipped": capacity_skipped}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": str(exc)}
 
