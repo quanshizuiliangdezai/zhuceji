@@ -88,6 +88,7 @@ DEFAULT_CONFIG = {
     "sub2api_max_register_batch": 5,
     "sub2api_pool_check_interval_sec": 300,
     "sub2api_account_concurrency": 1,
+    "sub2api_capacity": 1,
     "defaultDomains": "",
 }
 
@@ -166,6 +167,7 @@ def validate_config_structure(raw):
     cfg["sub2api_max_register_batch"] = _require_int(cfg, "sub2api_max_register_batch", 1, 1000)
     cfg["sub2api_pool_check_interval_sec"] = _require_int(cfg, "sub2api_pool_check_interval_sec", 60, 86400)
     cfg["sub2api_account_concurrency"] = _require_int(cfg, "sub2api_account_concurrency", 1, 100)
+    cfg["sub2api_capacity"] = _require_int(cfg, "sub2api_capacity", 1, 1000)
     string_keys = tuple(key for key, value in DEFAULT_CONFIG.items() if isinstance(value, str))
     path_keys = {
         "grok2api_local_token_file", "api_reverse_tools", "cpa_auth_dir", "cpa_hotload_dir",
