@@ -777,6 +777,7 @@ _SUB2API_KEYS = (
     "sub2api_proxy_key", "sub2api_proxy_id", "sub2api_grok_model",
     "sub2api_target_available", "sub2api_max_register_batch",
     "sub2api_pool_check_interval_sec", "sub2api_account_concurrency",
+    "sub2api_capacity",
 )
 _SUB2API_DEFAULT_PROXY_KEY = "http|127.0.0.1|10808||"
 
@@ -797,6 +798,7 @@ def _sub2api_cfg() -> dict:
         "max_register_batch": max(1, int(c.get("sub2api_max_register_batch") or 5)),
         "pool_check_interval": max(60, int(c.get("sub2api_pool_check_interval_sec") or 300)),
         "concurrency": max(1, int(c.get("sub2api_account_concurrency") or 1)),
+        "capacity": max(1, int(c.get("sub2api_capacity") or 1)),
     }
 
 
@@ -843,7 +845,8 @@ def _sub2api_list_grok(token: str, base: str) -> list:
 
 
 def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str,
-                        proxy_id: int = 0, model: str = "grok-4.6", concurrency: int = 1):
+                        proxy_id: int = 0, model: str = "grok-4.6", concurrency: int = 1,
+                        capacity: int = 1):
     creds = {"access_token": acc["access_token"], "base_url": acc["base_url"] or GROK_SUBSCRIPTION_PROXY}
     if acc.get("refresh_token"):
         creds["refresh_token"] = acc["refresh_token"]
@@ -858,7 +861,8 @@ def _sub2api_import_one(acc: dict, base: str, token: str, proxy_key: str,
         "platform": "grok", "type": "oauth",
         "credentials": creds,
         "proxy_key": proxy_key,
-        "concurrency": max(1, int(concurrency or 1)), "priority": 1, "rate_multiplier": 1,
+        "concurrency": max(1, int(concurrency or 1)), "capacity": max(1, int(capacity or 1)),
+        "priority": 1, "rate_multiplier": 1,
         "auto_pause_on_expired": True,
     }
     if proxy_id:
@@ -916,7 +920,8 @@ def _sso_sync_once() -> dict:
                         modeled += 1
             else:
                 new_id = _sub2api_import_one(acc, cfg["base_url"], token, cfg["proxy_key"],
-                                             cfg["proxy_id"], cfg["model"], cfg.get("concurrency", 1))
+                                             cfg["proxy_id"], cfg["model"], cfg.get("concurrency", 1),
+                                             cfg.get("capacity", 1))
                 if new_id:
                     _sub2api_update_account(new_id, cfg["group_id"], cfg["base_url"], token, cfg["proxy_id"])
                     added += 1
@@ -1165,6 +1170,7 @@ def get_sub2api_config():
         "sub2api_max_register_batch": int(c.get("sub2api_max_register_batch") or 5),
         "sub2api_pool_check_interval_sec": int(c.get("sub2api_pool_check_interval_sec") or 300),
         "sub2api_account_concurrency": max(1, int(c.get("sub2api_account_concurrency") or 1)),
+        "sub2api_capacity": max(1, int(c.get("sub2api_capacity") or 1)),
         "password_set": bool(c.get("sub2api_password")),
     }}
 
@@ -1179,6 +1185,7 @@ async def put_sub2api_config(request: Request):
         "sub2api_group_id", "sub2api_sync_interval_sec",
         "sub2api_target_available", "sub2api_max_register_batch",
         "sub2api_pool_check_interval_sec", "sub2api_account_concurrency",
+        "sub2api_capacity",
         "sub2api_proxy_id",
     }
     bool_keys = {"sub2api_auto_sync"}

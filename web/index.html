@@ -238,6 +238,7 @@ function renderFields() {
         + '<label class="sso-field"><span>目标可用数量 (0=关闭智能补充)</span><input id="sub2apiTargetAvailable" type="number" value="0" min="0" max="1000"></label>'
         + '<label class="sso-field"><span>单次最大补充</span><input id="sub2apiMaxBatch" type="number" value="5" min="1" max="50"></label>'
         + '<label class="sso-field"><span>池检查间隔 (秒)</span><input id="sub2apiPoolInterval" type="number" value="300" min="60"></label>'
+        + '<label class="sso-field"><span>容量</span><input id="sub2apiCapacity" type="number" value="1" min="1" max="100"></label>'
         + '</div>'
         + '<div class="sso-config-row"><label class="sso-check"><input type="checkbox" id="sub2apiAutoSync"> 启用定时自动同步 + 清理失效</label>'
         + '<div class="sso-config-actions"><button class="ghost" id="sub2apiDiscoverBtn">获取配置</button><button class="ghost" id="sub2apiSaveBtn">保存配置</button><button class="ghost" id="sub2apiFillBtn">立即补充</button><button id="sub2apiSyncBtn">立即同步</button></div></div>'
@@ -473,6 +474,7 @@ function loadSub2apiConfig() {
     $('sub2apiMaxBatch').value = c.sub2api_max_register_batch || 5;
     $('sub2apiPoolInterval').value = c.sub2api_pool_check_interval_sec || 300;
     $('sub2apiAccountConcurrency').value = c.sub2api_account_concurrency || 1;
+    $('sub2apiCapacity').value = c.sub2api_capacity || 1;
     $('sub2apiAutoSync').checked = !!c.sub2api_auto_sync;
     $('sub2apiProxyId').value = c.sub2api_proxy_id || '';
     // 如果已配置地址和邮箱，自动拉取一次可选列表，把 group/proxy/model 变成下拉框
@@ -533,6 +535,7 @@ function saveSub2apiConfig() {
     sub2api_max_register_batch: Math.max(1, Number($('sub2apiMaxBatch').value) || 5),
     sub2api_pool_check_interval_sec: Math.max(60, Number($('sub2apiPoolInterval').value) || 300),
     sub2api_account_concurrency: Math.max(1, Number($('sub2apiAccountConcurrency').value) || 1),
+    sub2api_capacity: Math.max(1, Number($('sub2apiCapacity').value) || 1),
     sub2api_auto_sync: $('sub2apiAutoSync').checked,
   };
   fetch('/api/sso/sub2api-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
